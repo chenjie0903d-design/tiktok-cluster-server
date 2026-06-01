@@ -128,7 +128,7 @@ def list_devices():
         item["has_screenshot"] = bool(shot)
         item["screenshot_time"] = shot.get("created_at") if shot else None
         result.append(item)
-    result.sort(key=lambda x: (x.get("daily_seq", 999999), not x.get("online", False), x.get("device_name", "")))))
+    result.sort(key=lambda x: (x.get("daily_seq", 999999), not x.get("online", False), x.get("device_name", "")))
     return {"ok": True, "devices": result}
 
 @app.post("/api/devices/{machine_code}/command")
