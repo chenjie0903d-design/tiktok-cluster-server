@@ -114,7 +114,7 @@ def list_devices():
     result = []
     for d in devices.values():
         item = dict(d)
-        item["online"] = now - item.get("last_seen", 0) <= 15
+        item["online"] = now - item.get("last_seen", 0) <= 60
         item["last_seen_ago"] = int(now - item.get("last_seen", 0))
         if not item["online"]:
             item["display_state"] = "offline"
@@ -128,7 +128,13 @@ def list_devices():
         item["has_screenshot"] = bool(shot)
         item["screenshot_time"] = shot.get("created_at") if shot else None
         result.append(item)
-    result.sort(key=lambda x: (x.get("daily_seq", 999999), not x.get("online", False), x.get("device_name", "")))
+    result.sort(
+        key=lambda x: (
+            x.get("daily_seq", 999999),
+            not x.get("online", False),
+            x.get("device_name", "")
+        )
+    )
     return {"ok": True, "devices": result}
 
 @app.post("/api/devices/{machine_code}/command")
