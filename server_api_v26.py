@@ -114,7 +114,7 @@ def list_devices():
     result = []
     for d in devices.values():
         item = dict(d)
-        item["online"] = now - item.get("last_seen", 0) <= 60
+        item["online"] = now - item.get("last_seen", 0) <= 15
         item["last_seen_ago"] = int(now - item.get("last_seen", 0))
         if not item["online"]:
             item["display_state"] = "offline"
@@ -128,13 +128,7 @@ def list_devices():
         item["has_screenshot"] = bool(shot)
         item["screenshot_time"] = shot.get("created_at") if shot else None
         result.append(item)
-    result.sort(
-        key=lambda x: (
-            x.get("daily_seq", 999999),
-            not x.get("online", False),
-            x.get("device_name", "")
-        )
-    )
+    result.sort(key=lambda x: (x.get("daily_seq", 999999), not x.get("online", False), x.get("device_name", "")))))
     return {"ok": True, "devices": result}
 
 @app.post("/api/devices/{machine_code}/command")
@@ -220,6 +214,29 @@ def get_screenshot(machine_code: str):
     if not shot:
         raise HTTPException(status_code=404, detail="screenshot not found")
     return {"ok": True, "screenshot": shot}
+
+
+
+@app.delete("/api/devices/{machine_code}")
+def delete_device(machine_code: str):
+    """删除客户端记录：设备状态、命令、截图、日志缓存。客户端程序本身不会被关闭。"""
+    removed = False
+    if machine_code in devices:
+        devices.pop(machine_code, None)
+        removed = True
+    commands.pop(machine_code, None)
+    screenshots.pop(machine_code, None)
+    logs.pop(machine_code, None)
+
+    # daily sequence 记录只删除该机器当天绑定，避免删除后旧机器继续占位
+    try:
+        today = current_day()
+        if daily_sequences.get(today, {}).get(machine_code) is not None:
+            daily_sequences[today].pop(machine_code, None)
+    except Exception:
+        pass
+
+    return {"ok": True, "removed": removed, "machine_code": machine_code}
 
 
 @app.get("/api/version")
