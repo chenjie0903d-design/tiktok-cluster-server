@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.2")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.4")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -266,8 +266,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v2.2",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_2"]
+        "version": "v26-web-v2.4",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_4"]
     }
 
 @app.get("/api/debug/devices")
@@ -337,7 +337,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V2.2</title>
+<title>TikTok 集群控制台 Web V2.4</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -366,9 +366,10 @@ h1{font-size:22px;margin:0;font-weight:900}
 .card.offline{border-top-color:var(--red)}.card.bad{background:#fff0f0;border-top-color:var(--red)}
 .card.busy{border-top-color:var(--orange)}.card.running{border-top-color:var(--green)}
 .seq{position:absolute;right:12px;top:12px;background:#111827;color:#fff;border-radius:999px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-weight:900}
-.dev-head{display:flex;align-items:center;gap:9px;padding-right:45px}
+.dev-head{display:flex;align-items:center;gap:9px;padding-right:88px}
 .select-box{width:24px;height:24px;accent-color:#1d9bf0}
-.name{font-size:20px;font-weight:900;line-height:1.25}
+.name{font-size:20px;font-weight:900;line-height:1.25;flex:0 1 12em;max-width:12em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ago-top{margin-left:auto;margin-right:4px;font-size:16px;font-weight:900;color:#111827;white-space:nowrap}
 .bad-text{color:#d92d20;font-weight:900}
 .line{margin-top:6px;color:#344054;word-break:break-all}
 .badge{display:inline-block;border-radius:999px;padding:4px 8px;margin-right:6px;font-size:13px;font-weight:850;background:#e8f3ff;color:#0270c9}
@@ -389,7 +390,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.2</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.4</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -420,10 +421,10 @@ h1{font-size:22px;margin:0;font-weight:900}
     <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
     <button class="btn red" onclick="sendSelected('stop_monitor')">停监控</button>
 
-    <button class="btn dark" onclick="renameSelected()">改名</button>
     <button class="btn dark" onclick="screenshotSelected()">截图</button>
     <button class="btn orange" onclick="sendSelected('restart_app_only')">重启</button>
     <button class="btn orange" onclick="sendSelected('restart_app_start')">重启后启动</button>
+    <button class="btn dark" onclick="sendSelected('update_github_config')">更新GitHub</button>
   </div>
 
   <div id="cards" class="cards"></div>
@@ -469,6 +470,13 @@ function stateClass(d){
   if(["screenshotting","switching_ip"].includes(d.display_state||d.status)) return "busy";
   return "";
 }
+
+function workTimeText(d){
+  const v = d.work_time || d.workTime || d.work_seconds || "";
+  if(v === null || v === undefined || String(v).trim()==="") return "-";
+  return escapeHtml(v);
+}
+
 function stateText(d){
   if(!d.online) return "离线";
   const s = d.display_state || d.status || "online";
@@ -478,7 +486,8 @@ function stateText(d){
 }
 function render(){
   const online = DEVICES.filter(d=>d.online).length;
-  document.getElementById("stats").textContent = `设备：${DEVICES.length}，在线：${online}，刷新时间：${new Date().toLocaleTimeString()}`;
+  const running = DEVICES.filter(d=>d.running).length;
+  document.getElementById("stats").textContent = `设备：${DEVICES.length}，在线：${online}，监控：${running}，刷新时间：${new Date().toLocaleTimeString()}`;
   const cards = document.getElementById("cards");
   cards.innerHTML = "";
   for(const d of DEVICES){
@@ -494,13 +503,14 @@ function render(){
       <div class="seq">${seq}</div>
       <div class="dev-head">
         <input class="select-box" type="checkbox" ${checked} onchange="toggleSelect('${code}', this.checked)">
-        <div class="name">${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}</div>
+        <div class="name" title="${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}">${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}</div>
+        <div class="ago-top">${d.last_seen_ago||0}秒前</div>
       </div>
       <div class="line">
         <span class="badge ${d.online?'':'red'}">${stateText(d)}</span>
         <b>在线</b>：${d.online?"是":"否"}　
         <b>监控</b>：${d.running?"是":"否"}　
-        <b>${d.last_seen_ago||0}秒前</b>
+        <b>工作时间</b>：${workTimeText(d)}
       </div>
       <div class="line ${bad?'bad-text':''}">运营商位置：${escapeHtml(loc)}　公网IP：${escapeHtml(d.public_ip||"-")}</div>
       <div class="line small">机器码：${escapeHtml(code)}</div>
@@ -609,7 +619,7 @@ function closeModal(){
   document.getElementById("imgModal").classList.remove("show");
 }
 loadDevices();
-setInterval(loadDevices,8000);
+setInterval(loadDevices,5000);
 </script>
 </body>
 </html>
