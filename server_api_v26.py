@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.0：从客户端上传/保存的运行日志中解析最近一次工作时间。
+    Web V3.1：从客户端上传/保存的运行日志中解析最近一次工作时间。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -310,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.0",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_0"]
+        "version": "v26-web-v3.1",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_1"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.0</title>
+<title>TikTok 集群控制台 Web V3.1</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -485,7 +485,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.0</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.1</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -536,7 +536,7 @@ h1{font-size:22px;margin:0;font-weight:900}
     <label>OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
   <div class="sync-row">
-    <label><input id="sync_no_restart_when_duration_ok" type="checkbox" checked>时长不走重启</label>
+    <label>时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
     <label><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
     <label>重启迟开 <input id="sync_restart_open_delay" type="number" value="2"></label>
     <label>点启动 <input id="sync_start_clicks" type="number" value="6"></label>
@@ -753,8 +753,10 @@ async function renameOne(code){
   }catch(e){ alert("改名失败：" + e.message); }
 }
 function showShot(code){
+  const d = DEVICES.find(x=>x.machine_code===code) || {};
+  const t = d.screenshot_time || 0;
   const img = document.getElementById("modalImg");
-  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}`;
+  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${t}`;
   document.getElementById("imgModal").classList.add("show");
 }
 function closeModal(){
@@ -763,15 +765,33 @@ function closeModal(){
 
 function getSyncConfig(){
   const networkEl = document.querySelector('input[name="sync_network"]:checked');
+  const switchIp = Number(document.getElementById("sync_cut_ip").value || 5);
+  const networkMode = networkEl ? networkEl.value : "5G";
+  const blueIp = Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210);
+  const ocr = Number(document.getElementById("sync_ocr_interval").value || 30);
+  const noResp = Number(document.getElementById("sync_check_no_response").value || 150);
+  const restartAfter = document.getElementById("sync_restart_then_start").checked;
+  const restartDelay = Number(document.getElementById("sync_restart_open_delay").value || 2);
+  const startDelay = Number(document.getElementById("sync_start_clicks").value || 6);
   return {
-    cut_ip: Number(document.getElementById("sync_cut_ip").value || 5),
-    network: networkEl ? networkEl.value : "5G",
-    blue_no_change_auto_ip: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210),
-    ocr_interval: Number(document.getElementById("sync_ocr_interval").value || 30),
-    no_restart_when_duration_ok: document.getElementById("sync_no_restart_when_duration_ok").checked,
-    restart_then_start: document.getElementById("sync_restart_then_start").checked,
-    restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
-    start_clicks: Number(document.getElementById("sync_start_clicks").value || 6)
+    // V3.1 正确字段，客户端 V29.4 优先读取这些
+    switch_ip: switchIp,
+    network_mode: networkMode,
+    auto_switch_ip_keep_blue: blueIp,
+    ocr_interval: ocr,
+    check_interval_no_response: noResp,
+    restart_after_launch: restartAfter,
+    restart_launch_delay: restartDelay,
+    start_click_delay: startDelay,
+
+    // 兼容 V2.5-V3.0 旧字段
+    cut_ip: switchIp,
+    network: networkMode,
+    blue_no_change_auto_ip: blueIp,
+    no_restart_when_duration_ok: noResp,
+    restart_then_start: restartAfter,
+    restart_open_delay: restartDelay,
+    start_clicks: startDelay
   };
 }
 async function syncConfigOne(code, cfg){
