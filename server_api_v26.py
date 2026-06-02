@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.1")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.2")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -266,8 +266,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v2.1-railway-test",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_1"]
+        "version": "v26-web-v2.2",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_2"]
     }
 
 @app.get("/api/debug/devices")
@@ -337,7 +337,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V2.1</title>
+<title>TikTok 集群控制台 Web V2.2</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -354,7 +354,11 @@ h1{font-size:22px;margin:0;font-weight:900}
 .stats{margin-top:9px;color:var(--muted);font-size:14px}
 .wrap{padding:12px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.btn{border:0;border-radius:13px;color:#fff;font-size:16px;font-weight:850;padding:13px 10px;min-height:46px}
+.all-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.multi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.multi-grid .wide{grid-column:span 2}
+
+.btn{border:0;border-radius:13px;color:#fff;font-size:15px;font-weight:850;padding:12px 8px;min-height:44px}
 .btn.blue{background:var(--blue)}.btn.green{background:var(--green)}.btn.red{background:var(--red)}.btn.orange{background:var(--orange)}.btn.dark{background:var(--dark)}
 .btn.gray{background:#e5e7eb;color:#111827}
 .multi{margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb}
@@ -369,7 +373,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 .line{margin-top:6px;color:#344054;word-break:break-all}
 .badge{display:inline-block;border-radius:999px;padding:4px 8px;margin-right:6px;font-size:13px;font-weight:850;background:#e8f3ff;color:#0270c9}
 .badge.red{background:#ffe4e2;color:#d92d20}.badge.green{background:#dcfae6;color:#079455}.badge.orange{background:#fff4e5;color:#b54708}
-.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
 .actions .btn{font-size:15px;padding:10px 8px;min-height:42px}
 .thumb-row{margin-top:12px;display:flex;align-items:center;gap:10px}
 .thumb{width:120px;max-height:80px;border:1px solid #d0d5dd;border-radius:8px;object-fit:contain;background:#f8fafc}
@@ -385,7 +389,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.1</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.2</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -393,25 +397,33 @@ h1{font-size:22px;margin:0;font-weight:900}
 </div>
 
 <div class="wrap">
-  <div class="grid">
-    <button class="btn green" onclick="sendAll('start_monitor')">全部启动监控</button>
-    <button class="btn red" onclick="sendAll('stop_monitor')">全部停止监控</button>
+  <div class="all-grid">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
-    <button class="btn orange" onclick="sendAll('restart_app_only')">重启全部软件</button>
-    <button class="btn orange" onclick="sendAll('restart_app_start')">重启全部并启动</button>
-    <button class="btn dark" onclick="batchScreenshotAll()">批量截图</button>
-    <button class="btn dark" onclick="sendAll('update_github_config')">更新GitHub</button>
+    <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
+
+    <button class="btn green" onclick="sendAll('start_monitor')">全部打开监控</button>
+    <button class="btn red" onclick="sendAll('stop_monitor')">全部停止监控</button>
+    <button class="btn orange" onclick="sendAll('restart_app_start')">全部重启并启动</button>
+
+    <button class="btn dark" onclick="batchScreenshotAll()">全部批量截图</button>
+    <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
+    <button class="btn gray" onclick="loadDevices()">刷新状态</button>
   </div>
 
-  <div class="grid multi">
-    <button class="btn gray" onclick="selectOnline()">多选在线</button>
-    <button class="btn gray" onclick="clearSelected()">取消选择</button>
-    <button class="btn green" onclick="sendSelected('start_monitor')">选中开监控</button>
-    <button class="btn red" onclick="sendSelected('stop_monitor')">选中停监控</button>
-    <button class="btn orange" onclick="sendSelected('restart_app_only')">选中重启</button>
-    <button class="btn dark" onclick="screenshotSelected()">选中截图</button>
-    <button class="btn dark" onclick="sendSelected('update_github_config')">选中更新GitHub</button>
+  <div class="multi-grid multi">
+    <button class="btn gray wide" onclick="selectOnline()">多选在线</button>
+    <button class="btn gray wide" onclick="clearSelected()">取消选择</button>
+
+    <button class="btn blue" onclick="sendSelected('open_target')">打开</button>
+    <button class="btn blue" onclick="sendSelected('start_target')">启动</button>
+    <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
+    <button class="btn red" onclick="sendSelected('stop_monitor')">停监控</button>
+
+    <button class="btn dark" onclick="renameSelected()">改名</button>
+    <button class="btn dark" onclick="screenshotSelected()">截图</button>
+    <button class="btn orange" onclick="sendSelected('restart_app_only')">重启</button>
+    <button class="btn orange" onclick="sendSelected('restart_app_start')">重启后启动</button>
   </div>
 
   <div id="cards" class="cards"></div>
@@ -490,19 +502,18 @@ function render(){
         <b>监控</b>：${d.running?"是":"否"}　
         <b>${d.last_seen_ago||0}秒前</b>
       </div>
-      <div class="line ${bad?'bad-text':''}">位置运营商：${escapeHtml(loc)}</div>
-      <div class="line">公网IP：${escapeHtml(d.public_ip||"-")}</div>
+      <div class="line ${bad?'bad-text':''}">运营商位置：${escapeHtml(loc)}　公网IP：${escapeHtml(d.public_ip||"-")}</div>
       <div class="line small">机器码：${escapeHtml(code)}</div>
       <div class="actions">
         <button class="btn blue" onclick="sendOne('${code}','open_target')">打开</button>
         <button class="btn blue" onclick="sendOne('${code}','start_target')">启动</button>
-        <button class="btn orange" onclick="sendOne('${code}','restart_app_only')">重启</button>
-        <button class="btn orange" onclick="sendOne('${code}','restart_app_start')">重启启动</button>
         <button class="btn green" onclick="sendOne('${code}','start_monitor')">开监控</button>
         <button class="btn red" onclick="sendOne('${code}','stop_monitor')">停监控</button>
+
         <button class="btn dark" onclick="renameOne('${code}')">改名</button>
         <button class="btn dark" onclick="sendOne('${code}','screenshot', true)">截图</button>
-        <button class="btn dark" onclick="sendOne('${code}','update_github_config')">更新GitHub</button>
+        <button class="btn orange" onclick="sendOne('${code}','restart_app_only')">重启</button>
+        <button class="btn orange" onclick="sendOne('${code}','restart_app_start')">重启后启动</button>
       </div>
       ${thumb}
     `;
@@ -560,6 +571,26 @@ async function sendSelected(cmd){
 }
 async function screenshotSelected(){ await sendSelected("screenshot"); }
 async function batchScreenshotAll(){ await sendAll("screenshot"); setTimeout(loadDevices, 4500); setTimeout(loadDevices, 8500); setTimeout(loadDevices, 12500); }
+
+async function renameSelected(){
+  const list = [...selected];
+  if(list.length===0){ alert("请先勾选设备"); return; }
+  if(list.length===1){ return renameOne(list[0]); }
+  const base = prompt(`已选择 ${list.length} 台设备，输入批量基础名称：`);
+  if(!base) return;
+  let i = 1;
+  try{
+    for(const code of list){
+      await api(`/api/devices/${encodeURIComponent(code)}/command`,{
+        method:"POST",
+        body:JSON.stringify({command:"rename",value:`${base}${i}`})
+      });
+      i++;
+    }
+    setTimeout(loadDevices,1000);
+  }catch(e){ alert("批量改名失败：" + e.message); }
+}
+
 async function renameOne(code){
   const d = DEVICES.find(x=>x.machine_code===code) || {};
   const name = prompt("输入新设备名称：", d.device_name || "");
