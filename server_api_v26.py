@@ -7,7 +7,7 @@ import os
 import base64
 from datetime import datetime
 
-app = FastAPI(title="TikTok Cluster Control Server V26")
+app = FastAPI(title="TikTok Cluster Control Server V33")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -213,6 +213,12 @@ def upload_screenshot(machine_code: str, shot: ScreenshotIn):
         "filepath": filepath,
     }
     # V32：截图上传成功后恢复在线状态，避免控制台一直显示“截图中”
+    try:
+        devices[machine_code]["status"] = "online"
+        devices[machine_code]["last_seen"] = time.time()
+    except Exception:
+        pass
+    # V33：截图上传成功后恢复状态，避免控制台一直显示“截图中”
     try:
         devices[machine_code]["status"] = "online"
         devices[machine_code]["last_seen"] = time.time()
