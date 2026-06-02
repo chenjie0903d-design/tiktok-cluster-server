@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.4")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.7")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -266,8 +266,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v2.4",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_4"]
+        "version": "v26-web-v2.7",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_7"]
     }
 
 @app.get("/api/debug/devices")
@@ -337,14 +337,14 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V2.4</title>
+<title>TikTok 集群控制台 Web V2.7</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
   --bg:#f4f6fa;--card:#fff;--text:#111827;--muted:#667085;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;font-size:15px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;font-size:15px;padding-bottom:142px}
 .header{position:sticky;top:0;z-index:10;background:#fff;padding:10px 12px 8px;border-bottom:1px solid #e5e7eb}
 .title-row{display:flex;align-items:center;gap:8px}
 h1{font-size:22px;margin:0;font-weight:900}
@@ -376,6 +376,37 @@ h1{font-size:22px;margin:0;font-weight:900}
 .badge.red{background:#ffe4e2;color:#d92d20}.badge.green{background:#dcfae6;color:#079455}.badge.orange{background:#fff4e5;color:#b54708}
 .actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
 .actions .btn{font-size:15px;padding:10px 8px;min-height:42px}
+
+.info-shot-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;margin-top:6px}
+.info-shot-main{min-width:0}
+.top-shot{min-width:96px;text-align:center;color:#667085;font-size:12px}
+.top-shot .thumb{width:120px;max-height:74px;border:1px solid #d0d5dd;border-radius:8px;object-fit:contain;background:#f8fafc}
+.top-shot-empty{font-size:12px;color:#98a2b3;padding-top:4px}
+@media (max-width:520px){
+  .info-shot-wrap{grid-template-columns:1fr}
+  .top-shot{text-align:left;margin-top:8px}
+  .top-shot .thumb{width:150px;max-height:90px}
+}
+
+
+.action-shot-wrap{display:grid;grid-template-columns:minmax(0,1fr) 104px;gap:8px;align-items:stretch;margin-top:10px}
+.action-shot-wrap .actions{margin-top:0}
+.action-side-shot{display:flex;align-items:center;justify-content:center;text-align:center;color:#667085;font-size:11px;min-height:78px}
+.action-side-shot .thumb{width:100px;max-height:76px;border:1px solid #d0d5dd;border-radius:8px;object-fit:contain;background:#f8fafc}
+.action-side-empty{border:1px dashed #d0d5dd;border-radius:8px;color:#98a2b3;padding:10px 4px}
+@media (max-width:520px){
+  .card{padding:12px 10px}
+  .actions{grid-template-columns:repeat(4,1fr);gap:6px}
+  .actions .btn{font-size:13px;padding:8px 4px;min-height:36px;border-radius:10px}
+  .action-shot-wrap{grid-template-columns:minmax(0,1fr) 92px;gap:6px}
+  .action-side-shot .thumb{width:88px;max-height:70px}
+}
+@media (max-width:390px){
+  .actions .btn{font-size:12px;padding:7px 3px;min-height:34px}
+  .action-shot-wrap{grid-template-columns:minmax(0,1fr) 84px}
+  .action-side-shot .thumb{width:82px;max-height:64px}
+}
+
 .thumb-row{margin-top:12px;display:flex;align-items:center;gap:10px}
 .thumb{width:120px;max-height:80px;border:1px solid #d0d5dd;border-radius:8px;object-fit:contain;background:#f8fafc}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;z-index:99;padding:16px}
@@ -383,14 +414,29 @@ h1{font-size:22px;margin:0;font-weight:900}
 .modal img{max-width:100%;max-height:88vh;border-radius:10px;background:#fff}
 .close{position:fixed;right:16px;top:16px;background:#fff;border:0;border-radius:999px;font-size:18px;font-weight:900;padding:8px 12px}
 .footer{color:#667085;text-align:center;padding:30px 10px 45px}
+
+.syncbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid #d0d5dd;box-shadow:0 -2px 10px rgba(15,23,42,.12);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+.sync-title{font-size:13px;font-weight:900;color:#111827;margin-bottom:6px}
+.sync-row{display:flex;align-items:center;gap:8px;overflow-x:auto;white-space:nowrap;padding-bottom:3px}
+.sync-row label{font-size:13px;color:#111827;font-weight:700;display:inline-flex;align-items:center;gap:4px}
+.sync-row input[type="number"]{width:54px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 6px;font-size:13px}
+.sync-row input[type="checkbox"],.sync-row input[type="radio"]{width:16px;height:16px;accent-color:#1d9bf0}
+.sync-btn{border:0;border-radius:9px;padding:8px 10px;font-size:13px;font-weight:850;color:#fff;background:#465465;min-width:92px}
+.sync-btn.primary{background:#1d9bf0}
+.sync-btn.green{background:#1db954}
+@media (min-width:900px){
+  body{padding-bottom:112px}
+  .syncbar{padding:8px 14px}
+}
+
 .small{font-size:13px;color:#667085}
-@media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.card{margin:0}}
+@media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 </style>
 </head>
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.4</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.7</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -430,6 +476,27 @@ h1{font-size:22px;margin:0;font-weight:900}
   <div id="cards" class="cards"></div>
   <div class="footer">Safari 可添加到主屏幕，当作手机 App 使用</div>
 </div>
+
+
+<div class="syncbar">
+  <div class="sync-title">集群参数同步</div>
+  <div class="sync-row">
+    <label>切IP <input id="sync_cut_ip" type="number" value="5"></label>
+    <label>网络
+      <input name="sync_network" type="radio" value="4G">4G
+      <input name="sync_network" type="radio" value="5G" checked>5G
+    </label>
+    <label>蓝色不变自动切IP <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
+    <label>OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
+    <label><input id="sync_no_restart_when_duration_ok" type="checkbox" checked>时长不走重启</label>
+    <label><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
+    <label>重启迟迟开软件 <input id="sync_restart_open_delay" type="number" value="2"></label>
+    <label>点启动 <input id="sync_start_clicks" type="number" value="6"></label>
+    <button class="sync-btn primary" onclick="syncConfigSelected()">保存并同步选中</button>
+    <button class="sync-btn green" onclick="syncConfigAll()">保存并同步全部</button>
+  </div>
+</div>
+
 
 <div id="imgModal" class="modal" onclick="closeModal()">
   <button class="close" onclick="closeModal()">×</button>
@@ -498,7 +565,7 @@ function render(){
     const checked = selected.has(code) ? "checked" : "";
     const loc = d.location_carrier || `${d.location||""}${d.carrier||""}` || "-";
     const bad = isBadCarrier(d);
-    const thumb = d.has_screenshot ? `<div class="thumb-row"><span class="small">缩略图：</span><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${Date.now()}"><span class="small">点击放大</span></div>` : `<div class="thumb-row small">缩略图：暂无</div>`;
+    const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${Date.now()}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
     card.innerHTML = `
       <div class="seq">${seq}</div>
       <div class="dev-head">
@@ -512,8 +579,13 @@ function render(){
         <b>监控</b>：${d.running?"是":"否"}　
         <b>工作时间</b>：${workTimeText(d)}
       </div>
-      <div class="line ${bad?'bad-text':''}">运营商位置：${escapeHtml(loc)}　公网IP：${escapeHtml(d.public_ip||"-")}</div>
-      <div class="line small">机器码：${escapeHtml(code)}</div>
+      <div class="info-shot-wrap">
+        <div class="info-shot-main">
+          <div class="line ${bad?'bad-text':''}">运营商位置：${escapeHtml(loc)}　公网IP：${escapeHtml(d.public_ip||"-")}</div>
+          <div class="line small">机器码：${escapeHtml(code)}</div>
+        </div>
+      </div>
+      <div class="action-shot-wrap">
       <div class="actions">
         <button class="btn blue" onclick="sendOne('${code}','open_target')">打开</button>
         <button class="btn blue" onclick="sendOne('${code}','start_target')">启动</button>
@@ -526,6 +598,7 @@ function render(){
         <button class="btn orange" onclick="sendOne('${code}','restart_app_start')">重启后启动</button>
       </div>
       ${thumb}
+      </div>
     `;
     cards.appendChild(card);
   }
@@ -598,6 +671,7 @@ async function renameSelected(){
       i++;
     }
     setTimeout(loadDevices,1000);
+    setTimeout(()=>screenshotSelected(),3000);
   }catch(e){ alert("批量改名失败：" + e.message); }
 }
 
@@ -608,6 +682,10 @@ async function renameOne(code){
   try{
     await api(`/api/devices/${encodeURIComponent(code)}/command`,{method:"POST",body:JSON.stringify({command:"rename",value:name})});
     setTimeout(loadDevices,1000);
+    // V2.7：改名后延迟3秒自动截图回传，方便确认改名是否成功
+    setTimeout(()=>sendOne(code,'screenshot', true),3000);
+    setTimeout(loadDevices,7000);
+    setTimeout(loadDevices,11000);
   }catch(e){ alert("改名失败：" + e.message); }
 }
 function showShot(code){
@@ -618,6 +696,47 @@ function showShot(code){
 function closeModal(){
   document.getElementById("imgModal").classList.remove("show");
 }
+
+function getSyncConfig(){
+  const networkEl = document.querySelector('input[name="sync_network"]:checked');
+  return {
+    cut_ip: Number(document.getElementById("sync_cut_ip").value || 5),
+    network: networkEl ? networkEl.value : "5G",
+    blue_no_change_auto_ip: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210),
+    ocr_interval: Number(document.getElementById("sync_ocr_interval").value || 30),
+    no_restart_when_duration_ok: document.getElementById("sync_no_restart_when_duration_ok").checked,
+    restart_then_start: document.getElementById("sync_restart_then_start").checked,
+    restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
+    start_clicks: Number(document.getElementById("sync_start_clicks").value || 6)
+  };
+}
+async function syncConfigOne(code, cfg){
+  await api(`/api/devices/${encodeURIComponent(code)}/config`,{
+    method:"POST",
+    body:JSON.stringify({config:cfg})
+  });
+}
+async function syncConfigSelected(){
+  const list = [...selected];
+  if(list.length===0){ alert("请先勾选设备"); return; }
+  const cfg = getSyncConfig();
+  if(!confirm(`确定同步参数到选中的 ${list.length} 台设备？`)) return;
+  try{
+    for(const code of list){ await syncConfigOne(code, cfg); }
+    alert("已同步选中设备");
+    setTimeout(loadDevices,1000);
+  }catch(e){ alert("同步失败：" + e.message); }
+}
+async function syncConfigAll(){
+  const cfg = getSyncConfig();
+  if(!confirm("确定同步参数到全部在线设备？")) return;
+  try{
+    const data = await api("/api/config/all",{method:"POST",body:JSON.stringify({config:cfg})});
+    alert(`已同步全部在线设备，数量：${data.count||0}`);
+    setTimeout(loadDevices,1000);
+  }catch(e){ alert("同步失败：" + e.message); }
+}
+
 loadDevices();
 setInterval(loadDevices,5000);
 </script>
