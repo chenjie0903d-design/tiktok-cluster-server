@@ -212,13 +212,12 @@ def upload_screenshot(machine_code: str, shot: ScreenshotIn):
         "filename": filename if filepath else "",
         "filepath": filepath,
     }
-    # V31：截图上传完成后，不能一直停留在 screenshotting；恢复为在线状态。
+    # V32：截图上传成功后恢复在线状态，避免控制台一直显示“截图中”
     try:
         devices[machine_code]["status"] = "online"
         devices[machine_code]["last_seen"] = time.time()
     except Exception:
         pass
-
     return {"ok": True, "filename": filename if filepath else "", "filepath": filepath}
 
 @app.get("/api/devices/{machine_code}/screenshot")
@@ -232,20 +231,18 @@ def get_screenshot(machine_code: str):
 
 @app.delete("/api/devices/{machine_code}")
 def delete_device(machine_code: str):
-    """V31：删除客户端记录、待执行命令、截图、配置和日志缓存。不会关闭客户端程序。"""
+    """V32：删除客户端记录、待执行命令、截图、配置和日志缓存。"""
     removed = machine_code in devices
     devices.pop(machine_code, None)
     commands.pop(machine_code, None)
     screenshots.pop(machine_code, None)
     configs.pop(machine_code, None)
     logs_store.pop(machine_code, None)
-
     try:
         global daily_seq_map
         daily_seq_map.pop(machine_code, None)
     except Exception:
         pass
-
     return {"ok": True, "removed": removed, "machine_code": machine_code}
 
 
