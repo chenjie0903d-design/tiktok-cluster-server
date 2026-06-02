@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.7")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.9")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -47,6 +47,47 @@ class ConfigIn(BaseModel):
 
 class LogIn(BaseModel):
     text: str
+
+
+
+def extract_work_time_from_log_text(text: str):
+    """
+    Web V2.9：从客户端上传/保存的运行日志中解析最近一次工作时间。
+    兼容类似：
+    工作时间：00:12:31
+    工作时长：12分钟
+    运行时长：1小时2分钟
+    """
+    if not text:
+        return None
+    import re
+    patterns = [
+        r"(?:工作时间|工作时长|运行时长)[:：]\s*([0-9]{1,2}[:：][0-9]{1,2}(?:[:：][0-9]{1,2})?)",
+        r"(?:工作时间|工作时长|运行时长)[:：]\s*([0-9]+小时[0-9]+分钟(?:[0-9]+秒)?)",
+        r"(?:工作时间|工作时长|运行时长)[:：]\s*([0-9]+分钟(?:[0-9]+秒)?)",
+        r"(?:工作时间|工作时长|运行时长)[:：]\s*([0-9]+秒)",
+    ]
+    for pat in patterns:
+        ms = list(re.finditer(pat, text))
+        if ms:
+            return ms[-1].group(1).replace("：", ":")
+    return None
+
+def get_device_work_time(machine_code: str, item: dict):
+    # 优先使用心跳直接上报字段；没有时从实时运行日志里抓最后一次工作时间
+    direct = item.get("work_time")
+    if direct not in (None, "", "-"):
+        return direct
+    try:
+        logs = logs_store.get(machine_code)
+        if isinstance(logs, list):
+            text = "\n".join(str(x) for x in logs[-80:])
+        else:
+            text = str(logs or "")
+        parsed = extract_work_time_from_log_text(text)
+        return parsed or "-"
+    except Exception:
+        return "-"
 
 
 def get_today_key():
@@ -131,6 +172,7 @@ def list_devices():
         shot = screenshots.get(item["machine_code"])
         item["has_screenshot"] = bool(shot)
         item["screenshot_time"] = shot.get("created_at") if shot else None
+        item["work_time"] = get_device_work_time(machine_code, item)
         result.append(item)
     result.sort(
         key=lambda x: (
@@ -266,8 +308,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v2.7",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_7"]
+        "version": "v26-web-v2.9",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_9"]
     }
 
 @app.get("/api/debug/devices")
@@ -337,14 +379,14 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V2.7</title>
+<title>TikTok 集群控制台 Web V2.9</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
   --bg:#f4f6fa;--card:#fff;--text:#111827;--muted:#667085;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;font-size:15px;padding-bottom:142px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;font-size:15px;padding-bottom:230px}
 .header{position:sticky;top:0;z-index:10;background:#fff;padding:10px 12px 8px;border-bottom:1px solid #e5e7eb}
 .title-row{display:flex;align-items:center;gap:8px}
 h1{font-size:22px;margin:0;font-weight:900}
@@ -363,13 +405,14 @@ h1{font-size:22px;margin:0;font-weight:900}
 .btn.gray{background:#e5e7eb;color:#111827}
 .multi{margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb}
 .card{position:relative;background:var(--card);border-radius:15px;margin:12px 0;padding:14px 12px;border-top:5px solid var(--blue);box-shadow:0 1px 4px rgba(0,0,0,.08)}
-.card.offline{border-top-color:var(--red)}.card.bad{background:#fff0f0;border-top-color:var(--red)}
+.card.offline{border-top-color:var(--red);opacity:.72}.card.bad{background:#fff0f0;border-top-color:var(--red)}
 .card.busy{border-top-color:var(--orange)}.card.running{border-top-color:var(--green)}
 .seq{position:absolute;right:12px;top:12px;background:#111827;color:#fff;border-radius:999px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-weight:900}
 .dev-head{display:flex;align-items:center;gap:9px;padding-right:88px}
 .select-box{width:24px;height:24px;accent-color:#1d9bf0}
 .name{font-size:20px;font-weight:900;line-height:1.25;flex:0 1 12em;max-width:12em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ago-top{margin-left:auto;margin-right:4px;font-size:16px;font-weight:900;color:#111827;white-space:nowrap}
+.card.offline .ago-top{color:#d92d20}
 .bad-text{color:#d92d20;font-weight:900}
 .line{margin-top:6px;color:#344054;word-break:break-all}
 .badge{display:inline-block;border-radius:999px;padding:4px 8px;margin-right:6px;font-size:13px;font-weight:850;background:#e8f3ff;color:#0270c9}
@@ -417,16 +460,20 @@ h1{font-size:22px;margin:0;font-weight:900}
 
 .syncbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid #d0d5dd;box-shadow:0 -2px 10px rgba(15,23,42,.12);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
 .sync-title{font-size:13px;font-weight:900;color:#111827;margin-bottom:6px}
-.sync-row{display:flex;align-items:center;gap:8px;overflow-x:auto;white-space:nowrap;padding-bottom:3px}
-.sync-row label{font-size:13px;color:#111827;font-weight:700;display:inline-flex;align-items:center;gap:4px}
-.sync-row input[type="number"]{width:54px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 6px;font-size:13px}
+.sync-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;align-items:center;margin-top:6px}
+.sync-row label{font-size:12px;color:#111827;font-weight:700;display:flex;align-items:center;gap:4px;min-width:0}
+.sync-row input[type="number"]{width:58px;min-width:48px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 5px;font-size:12px}
 .sync-row input[type="checkbox"],.sync-row input[type="radio"]{width:16px;height:16px;accent-color:#1d9bf0}
-.sync-btn{border:0;border-radius:9px;padding:8px 10px;font-size:13px;font-weight:850;color:#fff;background:#465465;min-width:92px}
+.sync-btn{border:0;border-radius:9px;padding:9px 6px;font-size:12px;font-weight:850;color:#fff;background:#465465;min-width:0}
 .sync-btn.primary{background:#1d9bf0}
 .sync-btn.green{background:#1db954}
 @media (min-width:900px){
-  body{padding-bottom:112px}
+  body{padding-bottom:170px}
   .syncbar{padding:8px 14px}
+  .sync-row{grid-template-columns:repeat(8,minmax(0,1fr))}
+
+  body{padding-bottom:170px}
+  .syncbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid #d0d5dd;box-shadow:0 -2px 10px rgba(15,23,42,.12);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
 }
 
 .small{font-size:13px;color:#667085}
@@ -436,7 +483,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.7</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.9</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -482,23 +529,25 @@ h1{font-size:22px;margin:0;font-weight:900}
   <div class="sync-title">集群参数同步</div>
   <div class="sync-row">
     <label>切IP <input id="sync_cut_ip" type="number" value="5"></label>
-    <label>网络
-      <input name="sync_network" type="radio" value="4G">4G
-      <input name="sync_network" type="radio" value="5G" checked>5G
-    </label>
-    <label>蓝色不变自动切IP <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
+    <label>网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
+    <label>蓝色不变 <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
     <label>OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
+  </div>
+  <div class="sync-row">
     <label><input id="sync_no_restart_when_duration_ok" type="checkbox" checked>时长不走重启</label>
     <label><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
-    <label>重启迟迟开软件 <input id="sync_restart_open_delay" type="number" value="2"></label>
+    <label>重启迟开 <input id="sync_restart_open_delay" type="number" value="2"></label>
     <label>点启动 <input id="sync_start_clicks" type="number" value="6"></label>
+  </div>
+  <div class="sync-row">
     <button class="sync-btn primary" onclick="syncConfigSelected()">保存并同步选中</button>
     <button class="sync-btn green" onclick="syncConfigAll()">保存并同步全部</button>
+    <button class="sync-btn" onclick="selectOnline()">多选在线</button>
+    <button class="sync-btn" onclick="clearSelected()">取消选择</button>
   </div>
 </div>
 
-
-<div id="imgModal" class="modal" onclick="closeModal()">
+<div id="imgModal"<div id="imgModal" class="modal" onclick="closeModal()">
   <button class="close" onclick="closeModal()">×</button>
   <img id="modalImg">
 </div>
@@ -538,6 +587,19 @@ function stateClass(d){
   return "";
 }
 
+
+function formatAgoSeconds(sec){
+  sec = Number(sec || 0);
+  if(sec < 60) return `${sec}秒前`;
+  if(sec < 3600) return `${Math.floor(sec/60)}分钟前`;
+  if(sec < 86400) return `${Math.floor(sec/3600)}小时前`;
+  return `${Math.floor(sec/86400)}天前`;
+}
+function agoText(d){
+  const t = formatAgoSeconds(d.last_seen_ago || 0);
+  return d.online ? t : `离线 ${t}`;
+}
+
 function workTimeText(d){
   const v = d.work_time || d.workTime || d.work_seconds || "";
   if(v === null || v === undefined || String(v).trim()==="") return "-";
@@ -565,13 +627,13 @@ function render(){
     const checked = selected.has(code) ? "checked" : "";
     const loc = d.location_carrier || `${d.location||""}${d.carrier||""}` || "-";
     const bad = isBadCarrier(d);
-    const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${Date.now()}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
+    const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
     card.innerHTML = `
       <div class="seq">${seq}</div>
       <div class="dev-head">
         <input class="select-box" type="checkbox" ${checked} onchange="toggleSelect('${code}', this.checked)">
         <div class="name" title="${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}">${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}</div>
-        <div class="ago-top">${d.last_seen_ago||0}秒前</div>
+        <div class="ago-top">${agoText(d)}</div>
       </div>
       <div class="line">
         <span class="badge ${d.online?'':'red'}">${stateText(d)}</span>
@@ -682,7 +744,7 @@ async function renameOne(code){
   try{
     await api(`/api/devices/${encodeURIComponent(code)}/command`,{method:"POST",body:JSON.stringify({command:"rename",value:name})});
     setTimeout(loadDevices,1000);
-    // V2.7：改名后延迟3秒自动截图回传，方便确认改名是否成功
+    // V2.9：改名后延迟3秒自动截图回传，方便确认改名是否成功
     setTimeout(()=>sendOne(code,'screenshot', true),3000);
     setTimeout(loadDevices,7000);
     setTimeout(loadDevices,11000);
@@ -690,7 +752,7 @@ async function renameOne(code){
 }
 function showShot(code){
   const img = document.getElementById("modalImg");
-  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${Date.now()}`;
+  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}`;
   document.getElementById("imgModal").classList.add("show");
 }
 function closeModal(){
