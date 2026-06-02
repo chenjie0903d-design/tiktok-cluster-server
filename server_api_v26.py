@@ -114,7 +114,7 @@ def list_devices():
     result = []
     for d in devices.values():
         item = dict(d)
-        item["online"] = now - item.get("last_seen", 0) <= 15
+        item["online"] = now - item.get("last_seen", 0) <= 60
         item["last_seen_ago"] = int(now - item.get("last_seen", 0))
         if not item["online"]:
             item["display_state"] = "offline"
@@ -128,7 +128,13 @@ def list_devices():
         item["has_screenshot"] = bool(shot)
         item["screenshot_time"] = shot.get("created_at") if shot else None
         result.append(item)
-    result.sort(key=lambda x: (x.get("daily_seq", 999999), not x.get("online", False), x.get("device_name", "")))))
+    result.sort(
+        key=lambda x: (
+            x.get("daily_seq", 999999),
+            not x.get("online", False),
+            x.get("device_name", "")
+        )
+    )
     return {"ok": True, "devices": result}
 
 @app.post("/api/devices/{machine_code}/command")
@@ -156,7 +162,7 @@ def send_all(cmd: CommandIn):
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
-        if now - d.get("last_seen", 0) > 15:
+        if now - d.get("last_seen", 0) > 60:
             continue
         item = {
             "id": str(uuid.uuid4()),
@@ -206,6 +212,13 @@ def upload_screenshot(machine_code: str, shot: ScreenshotIn):
         "filename": filename if filepath else "",
         "filepath": filepath,
     }
+    # V31：截图上传完成后，不能一直停留在 screenshotting；恢复为在线状态。
+    try:
+        devices[machine_code]["status"] = "online"
+        devices[machine_code]["last_seen"] = time.time()
+    except Exception:
+        pass
+
     return {"ok": True, "filename": filename if filepath else "", "filepath": filepath}
 
 @app.get("/api/devices/{machine_code}/screenshot")
@@ -219,20 +232,17 @@ def get_screenshot(machine_code: str):
 
 @app.delete("/api/devices/{machine_code}")
 def delete_device(machine_code: str):
-    """删除客户端记录：设备状态、命令、截图、日志缓存。客户端程序本身不会被关闭。"""
-    removed = False
-    if machine_code in devices:
-        devices.pop(machine_code, None)
-        removed = True
+    """V31：删除客户端记录、待执行命令、截图、配置和日志缓存。不会关闭客户端程序。"""
+    removed = machine_code in devices
+    devices.pop(machine_code, None)
     commands.pop(machine_code, None)
     screenshots.pop(machine_code, None)
-    logs.pop(machine_code, None)
+    configs.pop(machine_code, None)
+    logs_store.pop(machine_code, None)
 
-    # daily sequence 记录只删除该机器当天绑定，避免删除后旧机器继续占位
     try:
-        today = current_day()
-        if daily_sequences.get(today, {}).get(machine_code) is not None:
-            daily_sequences[today].pop(machine_code, None)
+        global daily_seq_map
+        daily_seq_map.pop(machine_code, None)
     except Exception:
         pass
 
@@ -275,7 +285,7 @@ def set_all_config(data: ConfigIn):
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
-        if now - d.get("last_seen", 0) > 15:
+        if now - d.get("last_seen", 0) > 60:
             continue
         configs[machine_code] = {
             "config": data.config,
