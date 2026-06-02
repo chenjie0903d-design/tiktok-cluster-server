@@ -7,7 +7,7 @@ import os
 import base64
 from datetime import datetime
 
-app = FastAPI(title="TikTok Cluster Control Server V33")
+app = FastAPI(title="TikTok Cluster Control Server V39")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -114,7 +114,7 @@ def list_devices():
     result = []
     for d in devices.values():
         item = dict(d)
-        item["online"] = now - item.get("last_seen", 0) <= 60
+        item["online"] = now - item.get("last_seen", 0) <= 120
         item["last_seen_ago"] = int(now - item.get("last_seen", 0))
         if not item["online"]:
             item["display_state"] = "offline"
@@ -165,7 +165,7 @@ def send_all(cmd: CommandIn):
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
-        if now - d.get("last_seen", 0) > 60:
+        if now - d.get("last_seen", 0) > 120:
             continue
         item = {
             "id": str(uuid.uuid4()),
@@ -266,7 +266,7 @@ def version():
     return {
         "ok": True,
         "version": "v26",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save"]
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s"]
     }
 
 @app.get("/api/debug/devices")
@@ -297,7 +297,7 @@ def set_all_config(data: ConfigIn):
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
-        if now - d.get("last_seen", 0) > 60:
+        if now - d.get("last_seen", 0) > 120:
             continue
         configs[machine_code] = {
             "config": data.config,
