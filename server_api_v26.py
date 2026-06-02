@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V2.9")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V3.0")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V2.9：从客户端上传/保存的运行日志中解析最近一次工作时间。
+    Web V3.0：从客户端上传/保存的运行日志中解析最近一次工作时间。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -80,7 +80,9 @@ def get_device_work_time(machine_code: str, item: dict):
         return direct
     try:
         logs = logs_store.get(machine_code)
-        if isinstance(logs, list):
+        if isinstance(logs, dict):
+            text = str(logs.get("text") or "")
+        elif isinstance(logs, list):
             text = "\n".join(str(x) for x in logs[-80:])
         else:
             text = str(logs or "")
@@ -164,15 +166,15 @@ def list_devices():
             item["display_state"] = "switching_ip"
         elif item.get("status") == "screenshotting":
             # V36：如果已经收到截图，就不要一直显示截图中
-            item["display_state"] = "online" if screenshots.get(item["machine_code"]) else "screenshotting"
+            item["display_state"] = "online" if screenshots.get(item.get("machine_code")) else "screenshotting"
         elif item.get("status") in ("starting_app", "restarting_app"):
             item["display_state"] = "online"
         else:
             item["display_state"] = "online"
-        shot = screenshots.get(item["machine_code"])
+        shot = screenshots.get(item.get("machine_code"))
         item["has_screenshot"] = bool(shot)
         item["screenshot_time"] = shot.get("created_at") if shot else None
-        item["work_time"] = get_device_work_time(machine_code, item)
+        item["work_time"] = get_device_work_time(item.get("machine_code"), item)
         result.append(item)
     result.sort(
         key=lambda x: (
@@ -308,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v2.9",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_9"]
+        "version": "v26-web-v3.0",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_0"]
     }
 
 @app.get("/api/debug/devices")
@@ -379,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V2.9</title>
+<title>TikTok 集群控制台 Web V3.0</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -483,7 +485,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V2.9</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.0</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -744,7 +746,7 @@ async function renameOne(code){
   try{
     await api(`/api/devices/${encodeURIComponent(code)}/command`,{method:"POST",body:JSON.stringify({command:"rename",value:name})});
     setTimeout(loadDevices,1000);
-    // V2.9：改名后延迟3秒自动截图回传，方便确认改名是否成功
+    // V3.0：改名后延迟3秒自动截图回传，方便确认改名是否成功
     setTimeout(()=>sendOne(code,'screenshot', true),3000);
     setTimeout(loadDevices,7000);
     setTimeout(loadDevices,11000);
