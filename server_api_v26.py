@@ -266,7 +266,7 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v2.1",
+        "version": "v26-web-v2.1-railway-test",
         "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v2_1"]
     }
 
