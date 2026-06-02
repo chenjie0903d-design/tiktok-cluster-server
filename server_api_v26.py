@@ -120,8 +120,11 @@ def list_devices():
             item["display_state"] = "offline"
         elif item.get("status") == "switching_ip":
             item["display_state"] = "switching_ip"
-        elif item.get("status") in ("starting_app", "restarting_app", "screenshotting"):
-            item["display_state"] = item.get("status")
+        elif item.get("status") == "screenshotting":
+            # V36：如果已经收到截图，就不要一直显示截图中
+            item["display_state"] = "online" if screenshots.get(item["machine_code"]) else "screenshotting"
+        elif item.get("status") in ("starting_app", "restarting_app"):
+            item["display_state"] = "online"
         else:
             item["display_state"] = "online"
         shot = screenshots.get(item["machine_code"])
@@ -219,6 +222,12 @@ def upload_screenshot(machine_code: str, shot: ScreenshotIn):
     except Exception:
         pass
     # V33：截图上传成功后恢复状态，避免控制台一直显示“截图中”
+    try:
+        devices[machine_code]["status"] = "online"
+        devices[machine_code]["last_seen"] = time.time()
+    except Exception:
+        pass
+    # V36：截图上传成功后恢复 online
     try:
         devices[machine_code]["status"] = "online"
         devices[machine_code]["last_seen"] = time.time()
