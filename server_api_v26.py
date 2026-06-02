@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server V39 WebAdmin")
+app = FastAPI(title="TikTok Cluster Control Server V39 WebAdmin V2")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -287,15 +287,17 @@ ADMIN_PAGE_HTML = r"""
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;font-size:15px}
 header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:10px 12px}
 .title{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:800;font-size:18px}.server{margin-top:8px;display:flex;gap:6px}.server input{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:13px;background:#fff}.summary{margin-top:7px;color:var(--muted);font-size:13px;line-height:1.35}
-.toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 12px}button{border:0;border-radius:11px;background:var(--btn);color:#fff;font-weight:700;padding:10px 9px;font-size:14px;min-height:40px}button.secondary{background:#475467}button.blue{background:var(--blue)}button.green{background:var(--green)}button.orange{background:var(--orange)}button.red{background:var(--red)}button.light{background:#eef2f7;color:#111827}button:active{transform:scale(.98)}
-main{padding:0 12px 24px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,.04);margin:10px 0;overflow:hidden}.card.bad{border-color:var(--red);box-shadow:0 0 0 2px rgba(255,48,48,.12)}
+.toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 12px}.toolbar.compact{padding-top:0}button{border:0;border-radius:11px;background:var(--btn);color:#fff;font-weight:700;padding:10px 9px;font-size:14px;min-height:40px}button.secondary{background:#475467}button.blue{background:var(--blue)}button.green{background:var(--green)}button.orange{background:var(--orange)}button.red{background:var(--red)}button.light{background:#eef2f7;color:#111827}button:active{transform:scale(.98)}
+.selectbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:0 12px 10px}.selectbar button{background:#344054}.selectbar .green{background:var(--green)}.selectbar .red{background:var(--red)}.selectbar .orange{background:var(--orange)}
+main{padding:0 12px 24px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,.04);margin:10px 0;overflow:hidden}.card.bad{border-color:var(--red);box-shadow:0 0 0 2px rgba(255,48,48,.12)}.card.selected{box-shadow:0 0 0 3px rgba(21,155,255,.22);border-color:var(--blue)}
 .bar{height:4px;background:var(--blue)}.bar.offline{background:var(--red)}.bar.busy{background:var(--orange)}.bar.monitoring{background:var(--green)}.bar.bad{background:var(--red)}
-.info{padding:12px}.row1{display:flex;align-items:center;justify-content:space-between;gap:10px}.name{font-size:17px;font-weight:900;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.seq{flex:0 0 auto;background:#111827;color:#fff;border-radius:999px;min-width:32px;height:32px;padding:0 9px;display:flex;align-items:center;justify-content:center;font-weight:900}
+.info{padding:12px}.row1{display:flex;align-items:center;justify-content:space-between;gap:10px}.leftTitle{display:flex;align-items:center;gap:9px;min-width:0;flex:1}.chk{width:22px;height:22px;accent-color:var(--blue);flex:0 0 auto}.name{font-size:17px;font-weight:900;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.seq{flex:0 0 auto;background:#111827;color:#fff;border-radius:999px;min-width:32px;height:32px;padding:0 9px;display:flex;align-items:center;justify-content:center;font-weight:900}
 .meta{margin-top:8px;color:#344054;line-height:1.6;font-size:14px;word-break:break-all}.state{display:inline-block;padding:2px 8px;border-radius:999px;font-weight:800;color:#fff;background:var(--blue);font-size:12px;margin-right:6px}.state.offline{background:var(--red)}.state.busy{background:var(--orange)}.state.monitoring{background:var(--green)}
 .warn{display:none;margin-top:7px;color:#fff;background:var(--red);border-radius:10px;padding:6px 8px;font-weight:800;font-size:13px}.card.bad .warn{display:block}
 .actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:0 12px 12px}.actions button{min-height:36px;font-size:13px;padding:8px 5px;border-radius:10px}
 .thumb{padding:0 12px 12px;display:flex;align-items:center;gap:8px}.thumb img{width:128px;max-height:82px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#f2f4f7}.thumb span{color:var(--muted);font-size:13px}.empty{color:var(--muted);text-align:center;padding:40px 12px}.footer{color:var(--muted);text-align:center;padding:18px 8px;font-size:12px}
-@media (min-width:820px){.toolbar{grid-template-columns:repeat(6,minmax(0,1fr))}main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card{margin:0}}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:99;display:none;align-items:center;justify-content:center;padding:12px}.modal.show{display:flex}.modal img{max-width:100%;max-height:92vh;border-radius:10px;background:#111}.modal .close{position:absolute;top:10px;right:12px;background:rgba(255,255,255,.16);color:#fff;border-radius:999px;padding:8px 13px;font-weight:900}.hint{padding:0 12px 8px;color:#667085;font-size:12px}
+@media (min-width:820px){.toolbar{grid-template-columns:repeat(6,minmax(0,1fr))}.selectbar{grid-template-columns:repeat(6,minmax(0,1fr))}main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card{margin:0}}
 </style>
 </head>
 <body>
@@ -314,48 +316,72 @@ main{padding:0 12px 24px}.card{background:var(--card);border:1px solid var(--lin
 <button class="secondary" onclick="sendAll('screenshot', true)">批量截图</button>
 <button class="secondary" onclick="sendAll('update_github_config')">更新GitHub</button>
 </section>
+<section class="selectbar">
+<button onclick="selectAllOnline()">多选在线</button>
+<button onclick="clearSelected()">取消选择</button>
+<button class="green" onclick="sendSelected('start_monitor')">选中开监控</button>
+<button class="red" onclick="sendSelected('stop_monitor')">选中停监控</button>
+<button class="orange" onclick="sendSelected('restart_app_only')">选中重启</button>
+<button onclick="sendSelected('screenshot', true)">选中截图</button>
+<button onclick="sendSelected('update_github_config')">选中更新GitHub</button>
+</section>
+<div class="hint">多选方法：勾选每台设备名称前面的方框；也可以点“多选在线”。</div>
 <main id="devices"></main>
 <div class="footer">Safari 可添加到主屏幕，当作手机 App 使用</div>
+<div id="imgModal" class="modal" onclick="hideImage()"><button class="close" onclick="hideImage();event.stopPropagation();">关闭</button><img id="modalImg" alt="截图预览"/></div>
 <script>
 const urlParams=new URLSearchParams(location.search);
 const keyFromUrl=urlParams.get("key")||"";
 if(keyFromUrl)localStorage.setItem("ADMIN_KEY",keyFromUrl);
 const ADMIN_KEY=keyFromUrl||localStorage.getItem("ADMIN_KEY")||"";
 document.getElementById("serverBox").value=location.origin;
+let devicesCache=[];
+let selectedCodes=new Set(JSON.parse(localStorage.getItem("SELECTED_CODES")||"[]"));
+function saveSelected(){localStorage.setItem("SELECTED_CODES",JSON.stringify([...selectedCodes]));updateSelectedSummary();}
 function apiUrl(path){const sep=path.includes("?")?"&":"?";return path+sep+"key="+encodeURIComponent(ADMIN_KEY);}
 function stateText(s){return {online:"在线",offline:"离线",switching_ip:"切IP中",screenshotting:"截图中",starting_app:"在线",restarting_app:"在线"}[s||"online"]||(s||"在线");}
 function badCarrier(d){const txt=`${d.location_carrier||""} ${d.carrier||""}`;return txt.includes("电信")||txt.includes("广电");}
 function stateClass(d){if(badCarrier(d))return"bad";if(!d.online||d.display_state==="offline")return"offline";if(d.running)return"monitoring";if(["switching_ip","screenshotting"].includes(d.display_state))return"busy";return"";}
 function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));}
+function updateSelectedSummary(){const el=document.getElementById("summary");if(!el)return;const total=devicesCache.length,online=devicesCache.filter(d=>d.online).length;el.textContent=`设备：${total}，在线：${online}，已选：${selectedCodes.size}，刷新时间：${new Date().toLocaleTimeString()}`;}
 async function loadDevices(){
- const box=document.getElementById("devices"),summary=document.getElementById("summary");
+ const box=document.getElementById("devices");
  try{
   const res=await fetch(apiUrl("/admin/api/devices"),{cache:"no-store"});
   if(!res.ok)throw new Error(await res.text());
-  const data=await res.json(),devices=data.devices||[],online=devices.filter(d=>d.online).length;
-  summary.textContent=`设备：${devices.length}，在线：${online}，刷新时间：${new Date().toLocaleTimeString()}`;
+  const data=await res.json(),devices=data.devices||[];devicesCache=devices;
+  const valid=new Set(devices.map(d=>d.machine_code));selectedCodes=new Set([...selectedCodes].filter(c=>valid.has(c)));saveSelected();
   if(!devices.length){box.innerHTML=`<div class="empty">暂无客户端上线</div>`;return;}
   box.innerHTML=devices.map(d=>renderDevice(d)).join("");
   devices.forEach(d=>{if(d.has_screenshot)loadThumb(d.machine_code);});
- }catch(e){summary.textContent="加载失败："+e.message;box.innerHTML=`<div class="empty">加载失败，请检查服务端或密码</div>`;}
+  updateSelectedSummary();
+ }catch(e){document.getElementById("summary").textContent="加载失败："+e.message;box.innerHTML=`<div class="empty">加载失败，请检查服务端或密码</div>`;}
 }
 function renderDevice(d){
- const seq=d.daily_seq||"-",cls=stateClass(d),carrier=d.location_carrier||`${d.location||""}${d.carrier||""}`||"-",state=stateText(d.display_state||d.status),code=d.machine_code||"";
- return `<article class="card ${badCarrier(d)?"bad":""}" id="card-${escapeHtml(code)}">
- <div class="bar ${cls}"></div><div class="info"><div class="row1"><div class="name">${escapeHtml(d.device_name||code.slice(0,8)||"未知设备")}</div><div class="seq">${escapeHtml(seq)}</div></div>
+ const seq=d.daily_seq||"-",cls=stateClass(d),carrier=d.location_carrier||`${d.location||""}${d.carrier||""}`||"-",state=stateText(d.display_state||d.status),code=d.machine_code||"",enc=encodeURIComponent(code),checked=selectedCodes.has(code)?"checked":"",sel=selectedCodes.has(code)?"selected":"";
+ return `<article class="card ${badCarrier(d)?"bad":""} ${sel}" id="card-${escapeHtml(code)}">
+ <div class="bar ${cls}"></div><div class="info"><div class="row1"><div class="leftTitle"><input class="chk" type="checkbox" ${checked} onchange="toggleSelect('${enc}',this.checked)"><div class="name" onclick="toggleCard('${enc}')">${escapeHtml(d.device_name||code.slice(0,8)||"未知设备")}</div></div><div class="seq">${escapeHtml(seq)}</div></div>
  <div class="meta"><span class="state ${cls}">${escapeHtml(state)}</span><b>${d.online?"在线":"离线"}</b>　监控：${d.running?"是":"否"}　${escapeHtml(d.last_seen_ago??0)}秒前<br>位置运营商：${escapeHtml(carrier)}<br>公网IP：${escapeHtml(d.public_ip||"-")}<br>机器码：${escapeHtml(code)}</div><div class="warn">运营商警告：检测到电信/广电</div></div>
  <div class="actions">
- <button class="blue" onclick="sendOne('${encodeURIComponent(code)}','open_target')">打开</button><button class="blue" onclick="sendOne('${encodeURIComponent(code)}','start_target')">启动</button><button class="orange" onclick="sendOne('${encodeURIComponent(code)}','restart_app_only')">重启</button>
- <button class="orange" onclick="sendOne('${encodeURIComponent(code)}','restart_app_start')">重启启动</button><button class="green" onclick="sendOne('${encodeURIComponent(code)}','start_monitor')">开监控</button><button class="red" onclick="sendOne('${encodeURIComponent(code)}','stop_monitor')">停监控</button>
- <button class="secondary" onclick="renameOne('${encodeURIComponent(code)}')">改名</button><button class="secondary" onclick="screenshotOne('${encodeURIComponent(code)}')">截图</button><button class="secondary" onclick="sendOne('${encodeURIComponent(code)}','update_github_config')">更新GitHub</button></div>
+ <button class="blue" onclick="sendOne('${enc}','open_target')">打开</button><button class="blue" onclick="sendOne('${enc}','start_target')">启动</button><button class="orange" onclick="sendOne('${enc}','restart_app_only')">重启</button>
+ <button class="orange" onclick="sendOne('${enc}','restart_app_start')">重启启动</button><button class="green" onclick="sendOne('${enc}','start_monitor')">开监控</button><button class="red" onclick="sendOne('${enc}','stop_monitor')">停监控</button>
+ <button class="secondary" onclick="renameOne('${enc}')">改名</button><button class="secondary" onclick="screenshotOne('${enc}')">截图</button><button class="secondary" onclick="sendOne('${enc}','update_github_config')">更新GitHub</button></div>
  <div class="thumb" id="thumb-${escapeHtml(code)}"><span>缩略图：${d.has_screenshot?"加载中...":"暂无"}</span></div></article>`;
 }
+function toggleSelect(codeEnc,checked){const code=decodeURIComponent(codeEnc);if(checked)selectedCodes.add(code);else selectedCodes.delete(code);saveSelected();const card=document.getElementById("card-"+code);if(card)card.classList.toggle("selected",checked);}
+function toggleCard(codeEnc){const code=decodeURIComponent(codeEnc),next=!selectedCodes.has(code);toggleSelect(codeEnc,next);const card=document.getElementById("card-"+code);const cb=card?card.querySelector(".chk"):null;if(cb)cb.checked=next;}
+function selectAllOnline(){selectedCodes=new Set(devicesCache.filter(d=>d.online).map(d=>d.machine_code));saveSelected();loadDevices();}
+function clearSelected(){selectedCodes.clear();saveSelected();loadDevices();}
 async function postJson(path,payload){const res=await fetch(apiUrl(path),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload||{})});if(!res.ok)throw new Error(await res.text());return await res.json();}
 async function sendAll(command,isShot=false){try{const data=await postJson("/admin/api/commands/all",{command});alert(`已下发：${command}，在线设备：${data.count??0}`);setTimeout(loadDevices,isShot?5500:800);if(isShot)setTimeout(loadDevices,9000);}catch(e){alert("下发失败："+e.message);}}
 async function sendOne(codeEnc,command,value=null){const code=decodeURIComponent(codeEnc);try{await postJson(`/admin/api/devices/${encodeURIComponent(code)}/command`,{command,value});if(command==="screenshot"){const el=document.getElementById("thumb-"+code);if(el)el.innerHTML="<span>截图中...</span>";setTimeout(()=>loadThumb(code),5500);setTimeout(()=>loadThumb(code),9000);}else{setTimeout(loadDevices,800);}}catch(e){alert("下发失败："+e.message);}}
+async function sendSelected(command,isShot=false){const codes=[...selectedCodes];if(!codes.length){alert("请先勾选设备");return;}if(!confirm(`确定给 ${codes.length} 台设备下发：${command}？`))return;let ok=0,fail=0;for(const code of codes){try{await postJson(`/admin/api/devices/${encodeURIComponent(code)}/command`,{command});ok++;if(isShot){const el=document.getElementById("thumb-"+code);if(el)el.innerHTML="<span>截图中...</span>";}}catch(e){fail++;}}
+ alert(`已下发完成：成功 ${ok}，失败 ${fail}`);setTimeout(loadDevices,isShot?5500:800);if(isShot)setTimeout(loadDevices,9000);}
 function screenshotOne(codeEnc){sendOne(codeEnc,"screenshot");}
 function renameOne(codeEnc){const code=decodeURIComponent(codeEnc),name=prompt("输入新设备名称：");if(!name)return;sendOne(encodeURIComponent(code),"rename",name);}
-async function loadThumb(code){const el=document.getElementById("thumb-"+code);if(!el)return;try{const res=await fetch(apiUrl(`/admin/api/devices/${encodeURIComponent(code)}/screenshot`),{cache:"no-store"});if(!res.ok)throw new Error("无截图");const data=await res.json(),shot=data.screenshot||{};if(!shot.image_base64)throw new Error("无截图");el.innerHTML=`<img src="data:image/jpeg;base64,${shot.image_base64}" onclick="window.open(this.src)" /><span>点击放大</span>`;}catch(e){el.innerHTML="<span>缩略图：暂无</span>";}}
+async function loadThumb(code){const el=document.getElementById("thumb-"+code);if(!el)return;try{const res=await fetch(apiUrl(`/admin/api/devices/${encodeURIComponent(code)}/screenshot`),{cache:"no-store"});if(!res.ok)throw new Error("无截图");const data=await res.json(),shot=data.screenshot||{};if(!shot.image_base64)throw new Error("无截图");const src=`data:image/jpeg;base64,${shot.image_base64}`;el.innerHTML=`<img src="${src}" onclick="showImage(this.src)" /><span>点击放大</span>`;}catch(e){el.innerHTML="<span>缩略图：暂无</span>";}}
+function showImage(src){const m=document.getElementById("imgModal"),img=document.getElementById("modalImg");img.src=src;m.classList.add("show");}
+function hideImage(){const m=document.getElementById("imgModal"),img=document.getElementById("modalImg");m.classList.remove("show");img.src="";}
 loadDevices();setInterval(loadDevices,8000);
 </script>
 </body>
@@ -403,8 +429,8 @@ def mobile_admin_delete_device(machine_code: str, key: Optional[str] = None):
 def version():
     return {
         "ok": True,
-        "version": "v39-web-admin-v1",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_web_admin"]
+        "version": "v39-web-admin-v2",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_web_admin", "mobile_multi_select", "mobile_image_modal"]
     }
 
 @app.get("/api/debug/devices")
