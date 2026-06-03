@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.1")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.2")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V4.1：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -312,8 +312,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v4.1",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_1"]
+        "version": "v26-web-v4.2",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_2"]
     }
 
 @app.get("/api/debug/devices")
@@ -383,7 +383,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V4.1</title>
+<title>TikTok 集群控制台 Web V4.2</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -643,25 +643,30 @@ body.sync-collapsed{padding-bottom:42px}
   .device-restart-start .two-line{line-height:1.05}
 }
 
-/* V4.0：远程软件更新包 */
+/* V4.2：远程软件更新包，两行四列等分 */
 .package-section{
   grid-column:1 / -1;
   border-top:1px solid #e5e7eb;
   margin-top:8px;
   padding-top:8px;
   display:grid;
-  grid-template-columns:2fr 1.6fr 1fr 1fr 1.2fr auto auto;
+  grid-template-columns:repeat(4,minmax(0,1fr));
   gap:7px;
   align-items:center;
 }
-.package-section label{
-  display:flex;
-  align-items:center;
-  gap:5px;
+.package-section label,
+.package-section .pkg-checks{
   font-size:13px;
   font-weight:800;
-  white-space:nowrap;
   color:#111827;
+}
+.package-section .pkg-field{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:center;
+  gap:6px;
+  white-space:nowrap;
+  min-width:0;
 }
 .package-section input[type="text"]{
   width:100%;
@@ -676,9 +681,19 @@ body.sync-collapsed{padding-bottom:42px}
   height:15px;
   accent-color:#1d9bf0;
 }
-.package-section .pkg-url{grid-column:span 2}
-.package-section .pkg-exe{grid-column:span 2}
-.package-section .pkg-sha{grid-column:span 2}
+.package-section .pkg-checks{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  align-items:center;
+  min-width:0;
+}
+.package-section .pkg-checks label{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  white-space:nowrap;
+}
 .pkg-btn{
   border:0;
   border-radius:9px;
@@ -688,30 +703,66 @@ body.sync-collapsed{padding-bottom:42px}
   color:#fff;
   background:#465465;
   white-space:nowrap;
+  width:100%;
+  min-height:38px;
 }
 .pkg-btn.primary{background:#1d9bf0}
 .pkg-btn.green{background:#1db954}
 @media (max-width:899px){
   .package-section{
-    grid-template-columns:1fr 1fr;
+    grid-template-columns:1fr;
     gap:7px;
   }
-  .package-section .pkg-url,
-  .package-section .pkg-exe,
-  .package-section .pkg-sha,
-  .package-section .pkg-title{
-    grid-column:span 2;
+  .package-section .pkg-field{
+    grid-template-columns:78px minmax(0,1fr);
+    gap:7px;
   }
-  .package-section label{
+  .package-section label,
+  .package-section .pkg-checks{
     font-size:13px;
   }
   .package-section input[type="text"]{
     font-size:13px;
     padding:8px 6px;
   }
+  .package-section .pkg-checks{
+    grid-template-columns:1fr 1fr;
+  }
   .pkg-btn{
     font-size:13px;
     min-height:36px;
+  }
+}
+
+
+/* V4.2：手机端底部同步按钮等高，两行文字 */
+.sync-btn .two-line{
+  display:inline-block;
+  line-height:1.08;
+}
+@media (max-width:899px){
+  .sync-row .sync-btn{
+    min-height:44px;
+    height:44px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    line-height:1.08;
+  }
+  .sync-row .sync-select-online,
+  .sync-row .sync-clear{
+    min-height:44px;
+    height:44px;
+  }
+}
+@media (min-width:900px){
+  .sync-row .sync-btn{
+    min-height:36px;
+    height:36px;
+    display:flex !important;
+    align-items:center;
+    justify-content:center;
+    line-height:1.08;
   }
 }
 
@@ -722,7 +773,7 @@ body.sync-collapsed{padding-bottom:42px}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V4.1</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V4.2</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <div class="stats" id="stats">加载中...</div>
@@ -803,20 +854,23 @@ body.sync-collapsed{padding-bottom:42px}
     <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="6"></label>
   </div>
   <div class="sync-row">
-    <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()">保存并同步选中</button>
-    <button class="sync-btn green sync-save-all" onclick="syncConfigAll()">保存并同步全部</button>
+    <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()"><span class="two-line">保存并<br>同步选中</span></button>
+    <button class="sync-btn green sync-save-all" onclick="syncConfigAll()"><span class="two-line">保存并<br>同步全部</span></button>
     <button class="sync-btn sync-select-online" onclick="selectOnline()">多选在线</button>
     <button class="sync-btn sync-clear" onclick="clearSelected()">取消选择</button>
   </div>
 
   <div class="package-section">
-    <label class="pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
-    <label class="pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe"></label>
-    <label class="pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写；不要带 sha256: 前缀"></label>
-    <label>文件夹名 <input id="pkg_folder" type="text" placeholder="留空=按zip顶层文件夹"></label>
-    <label class="pkg-title">窗口标题 <input id="pkg_title" type="text" placeholder="新版窗口标题，可空"></label>
-    <label><input id="pkg_launch" type="checkbox" checked>解压后打开</label>
-    <label><input id="pkg_start" type="checkbox">打开后启动</label>
+    <label class="pkg-field pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
+    <label class="pkg-field pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe"></label>
+    <label class="pkg-field pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写；不要带 sha256: 前缀"></label>
+    <label class="pkg-field pkg-folder">文件夹名 <input id="pkg_folder" type="text" placeholder="留空=按zip顶层文件夹"></label>
+
+    <label class="pkg-field pkg-title">窗口标题 <input id="pkg_title" type="text" placeholder="新版窗口标题，可空"></label>
+    <div class="pkg-checks">
+      <label><input id="pkg_launch" type="checkbox" checked>解压后打开</label>
+      <label><input id="pkg_start" type="checkbox">打开后启动</label>
+    </div>
     <button class="pkg-btn primary" onclick="updatePackageSelected()">更新选中</button>
     <button class="pkg-btn green" onclick="updatePackageAll()">更新全部在线</button>
   </div>
