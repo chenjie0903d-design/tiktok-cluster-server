@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V3.3：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -310,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.2",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_2"]
+        "version": "v26-web-v3.3",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_3"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.2</title>
+<title>TikTok 集群控制台 Web V3.3</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -471,7 +471,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 .sync-btn.primary{background:#1d9bf0}
 .sync-btn.green{background:#1db954}
 @media (min-width:900px){
-  body{padding-bottom:125px}
+  body{padding-bottom:86px}
   .mobile-only{display:none !important}
   .desktop-top-grid,.desktop-action-grid{display:grid;gap:10px;margin-bottom:10px}
   .desktop-top-grid{grid-template-columns:repeat(9,minmax(0,1fr))}
@@ -494,7 +494,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.2</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.3</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -555,7 +555,7 @@ h1{font-size:22px;margin:0;font-weight:900}
   </div>
 
   <div id="cards" class="cards"></div>
-  <div class="footer">Safari 可添加到主屏幕，当作手机 App 使用</div>
+  <div class="footer"></div>
 </div>
 
 
@@ -568,7 +568,7 @@ h1{font-size:22px;margin:0;font-weight:900}
     <label class="sync-ocr">OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
   <div class="sync-row">
-    <label class="sync-norestart"><input id="sync_no_restart_when_duration_ok" type="checkbox" checked>时长不走重启</label>
+    <label class="sync-norestart">时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
     <label class="sync-restartthen"><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
     <label class="sync-restartdelay">重启迟开 <input id="sync_restart_open_delay" type="number" value="2"></label>
     <label class="sync-startclicks">点启动 <input id="sync_start_clicks" type="number" value="6"></label>
@@ -795,14 +795,21 @@ function closeModal(){
 
 function getSyncConfig(){
   const networkEl = document.querySelector('input[name="sync_network"]:checked');
+  const noRespEl = document.getElementById("sync_check_no_response");
+  const oldNoRestart = document.getElementById("sync_no_restart_when_duration_ok");
+  const noResp = noRespEl ? Number(noRespEl.value || 150) : (oldNoRestart ? oldNoRestart.checked : true);
   return {
-    cut_ip: Number(document.getElementById("sync_cut_ip").value || 5),
-    network: networkEl ? networkEl.value : "5G",
-    blue_no_change_auto_ip: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210),
+    switch_ip: Number(document.getElementById("sync_cut_ip").value || 5),
+    network_mode: networkEl ? networkEl.value : "5G",
+    auto_switch_ip_keep_blue: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210),
     ocr_interval: Number(document.getElementById("sync_ocr_interval").value || 30),
-    no_restart_when_duration_ok: document.getElementById("sync_no_restart_when_duration_ok").checked,
+    check_interval_no_response: noResp,
+    no_restart_when_duration_ok: noResp,
+    restart_after_launch: document.getElementById("sync_restart_then_start").checked,
     restart_then_start: document.getElementById("sync_restart_then_start").checked,
+    restart_launch_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
     restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
+    start_click_delay: Number(document.getElementById("sync_start_clicks").value || 6),
     start_clicks: Number(document.getElementById("sync_start_clicks").value || 6)
   };
 }
