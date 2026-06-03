@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.8：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V3.9：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -310,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.8",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_8"]
+        "version": "v26-web-v3.9",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_9"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.8</title>
+<title>TikTok 集群控制台 Web V3.9</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -594,6 +594,53 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+/* V3.9：同步参数确认弹窗居中 */
+.dialog-modal{
+  position:fixed;
+  inset:0;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  background:rgba(15,23,42,.35);
+  z-index:120;
+  padding:18px;
+}
+.dialog-modal.show{display:flex}
+.dialog-box{
+  width:min(420px,92vw);
+  background:#fff;
+  border-radius:16px;
+  box-shadow:0 12px 36px rgba(15,23,42,.25);
+  padding:18px;
+  text-align:center;
+}
+.dialog-text{
+  font-size:17px;
+  font-weight:800;
+  color:#111827;
+  line-height:1.45;
+  margin:6px 0 16px;
+}
+.dialog-actions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.dialog-actions.single{grid-template-columns:1fr}
+.dialog-actions button{
+  border:0;
+  border-radius:12px;
+  padding:11px 12px;
+  font-size:15px;
+  font-weight:900;
+}
+.dialog-cancel{background:#e5e7eb;color:#111827}
+.dialog-ok{background:#1d9bf0;color:#fff}
+.two-line{display:inline-block;line-height:1.12}
+@media (max-width:899px){
+  .device-restart-start .two-line{line-height:1.05}
+}
+
 .small{font-size:13px;color:#667085}
 @media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 </style>
@@ -601,7 +648,7 @@ body.sync-collapsed{padding-bottom:42px}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.8</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.9</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <div class="stats" id="stats">加载中...</div>
@@ -689,6 +736,17 @@ body.sync-collapsed{padding-bottom:42px}
   </div>
 </div>
 
+
+<div id="centerDialog" class="dialog-modal">
+  <div class="dialog-box">
+    <div id="dialogText" class="dialog-text"></div>
+    <div id="dialogActions" class="dialog-actions">
+      <button id="dialogCancel" class="dialog-cancel">取消</button>
+      <button id="dialogOk" class="dialog-ok">确定</button>
+    </div>
+  </div>
+</div>
+
 <div id="imgModal" class="modal" onclick="closeModal()">
   <button class="close" onclick="closeModal()">×</button>
   <img id="modalImg">
@@ -702,6 +760,39 @@ if (keyFromUrl) localStorage.setItem("ADMIN_KEY", keyFromUrl);
 const ADMIN_KEY = keyFromUrl || localStorage.getItem("ADMIN_KEY") || "";
 let DEVICES = [];
 let selected = new Set();
+
+function centerDialog(message, options={}){
+  return new Promise(resolve=>{
+    const modal = document.getElementById("centerDialog");
+    const text = document.getElementById("dialogText");
+    const actions = document.getElementById("dialogActions");
+    const cancel = document.getElementById("dialogCancel");
+    const ok = document.getElementById("dialogOk");
+    const confirmMode = options.confirm !== false;
+    text.textContent = message;
+    actions.classList.toggle("single", !confirmMode);
+    cancel.style.display = confirmMode ? "" : "none";
+    ok.textContent = options.okText || "确定";
+    cancel.textContent = options.cancelText || "取消";
+
+    const cleanup = (val)=>{
+      modal.classList.remove("show");
+      ok.onclick = null;
+      cancel.onclick = null;
+      resolve(val);
+    };
+    ok.onclick = ()=>cleanup(true);
+    cancel.onclick = ()=>cleanup(false);
+    modal.classList.add("show");
+  });
+}
+function centerAlert(message){
+  return centerDialog(message, {confirm:false, okText:"知道了"});
+}
+function centerConfirm(message){
+  return centerDialog(message, {confirm:true, okText:"确定", cancelText:"取消"});
+}
+
 
 function setMobileControlsCollapsed(collapsed){
   const allBox = document.getElementById("mobileAllControls");
@@ -838,7 +929,7 @@ function render(){
         <button class="btn dark" onclick="renameOne('${code}')">改名</button>
         <button class="btn dark" onclick="sendOne('${code}','screenshot', true)">截图</button>
         <button class="btn orange" onclick="sendOne('${code}','restart_app_only')">重启</button>
-        <button class="btn orange" onclick="sendOne('${code}','restart_app_start')">重启后启动</button>
+        <button class="btn orange device-restart-start" onclick="sendOne('${code}','restart_app_start')"><span class="two-line">重启后<br>启动</span></button>
       </div>
       ${thumb}
       </div>
@@ -932,8 +1023,10 @@ async function renameOne(code){
   }catch(e){ alert("改名失败：" + e.message); }
 }
 function showShot(code){
+  const d = DEVICES.find(x=>x.machine_code===code) || {};
+  const t = d.screenshot_time || 0;
   const img = document.getElementById("modalImg");
-  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}`;
+  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${t}`;
   document.getElementById("imgModal").classList.add("show");
 }
 function closeModal(){
@@ -966,25 +1059,25 @@ async function syncConfigOne(code, cfg){
     body:JSON.stringify({config:cfg})
   });
 }
-async function syncConfigSelected(){
+async async function syncConfigSelected(){
   const list = [...selected];
-  if(list.length===0){ alert("请先勾选设备"); return; }
+  if(list.length===0){ await centerAlert("请先勾选设备"); return; }
   const cfg = getSyncConfig();
-  if(!confirm(`确定同步参数到选中的 ${list.length} 台设备？`)) return;
+  if(!await centerConfirm(`确定同步参数到选中的 ${list.length} 台设备？`)) return;
   try{
     for(const code of list){ await syncConfigOne(code, cfg); }
-    alert("已同步选中设备");
+    await centerAlert("已同步选中设备");
     setTimeout(loadDevices,1000);
-  }catch(e){ alert("同步失败：" + e.message); }
+  }catch(e){ await centerAlert("同步失败：" + e.message); }
 }
 async function syncConfigAll(){
   const cfg = getSyncConfig();
-  if(!confirm("确定同步参数到全部在线设备？")) return;
+  if(!await centerConfirm("确定同步参数到全部在线设备？")) return;
   try{
     const data = await api("/api/config/all",{method:"POST",body:JSON.stringify({config:cfg})});
-    alert(`已同步全部在线设备，数量：${data.count||0}`);
+    await centerAlert(`已同步全部在线设备，数量：${data.count||0}`);
     setTimeout(loadDevices,1000);
-  }catch(e){ alert("同步失败：" + e.message); }
+  }catch(e){ await centerAlert("同步失败：" + e.message); }
 }
 
 loadDevices();
