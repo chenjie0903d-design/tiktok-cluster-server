@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.4：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V3.6：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -310,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.4",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_4"]
+        "version": "v26-web-v3.6",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_6"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.4</title>
+<title>TikTok 集群控制台 Web V3.6</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -395,7 +395,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 .ver{font-size:12px;background:#111827;color:#fff;border-radius:999px;padding:2px 7px}
 .refresh-btn{margin-left:auto;border:0;border-radius:12px;background:#eef2f7;padding:10px 14px;font-weight:800;color:#111827}
 .server{margin-top:10px;width:100%;border:1px solid #d0d5dd;border-radius:13px;padding:11px 12px;font-size:14px;background:#fff}
-.stats{margin-top:9px;color:var(--muted);font-size:14px}
+.stats{margin-top:9px;color:var(--muted);font-size:16px;font-weight:800}
 .wrap{padding:12px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .all-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
@@ -462,12 +462,12 @@ h1{font-size:22px;margin:0;font-weight:900}
 .footer{color:#667085;text-align:center;padding:30px 10px 45px}
 
 .syncbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid #d0d5dd;box-shadow:0 -2px 10px rgba(15,23,42,.12);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
-.sync-title{font-size:13px;font-weight:900;color:#111827;margin-bottom:6px}
+.sync-title{font-size:15px;font-weight:900;color:#111827;margin-bottom:6px}
 .sync-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;align-items:center;margin-top:6px}
-.sync-row label{font-size:12px;color:#111827;font-weight:700;display:flex;align-items:center;gap:4px;min-width:0}
-.sync-row input[type="number"]{width:58px;min-width:48px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 5px;font-size:12px}
+.sync-row label{font-size:14px;color:#111827;font-weight:700;display:flex;align-items:center;gap:4px;min-width:0}
+.sync-row input[type="number"]{width:58px;min-width:48px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 5px;font-size:14px}
 .sync-row input[type="checkbox"],.sync-row input[type="radio"]{width:16px;height:16px;accent-color:#1d9bf0}
-.sync-btn{border:0;border-radius:9px;padding:9px 6px;font-size:12px;font-weight:850;color:#fff;background:#465465;min-width:0}
+.sync-btn{border:0;border-radius:9px;padding:9px 6px;font-size:14px;font-weight:850;color:#fff;background:#465465;min-width:0}
 .sync-btn.primary{background:#1d9bf0}
 .sync-btn.green{background:#1db954}
 @media (min-width:900px){
@@ -475,7 +475,7 @@ h1{font-size:22px;margin:0;font-weight:900}
   .footer{display:none}
   .mobile-only{display:none !important}
   .desktop-top-grid,.desktop-action-grid{display:grid;gap:10px;margin-bottom:10px}
-  .desktop-top-grid{grid-template-columns:repeat(9,minmax(0,1fr))}
+  .desktop-top-grid{grid-template-columns:repeat(8,minmax(0,1fr))}
   .desktop-action-grid{grid-template-columns:repeat(8,minmax(0,1fr))}
   .desktop-top-grid .btn,.desktop-action-grid .btn{padding:11px 6px;font-size:14px;min-height:42px;white-space:nowrap}
 
@@ -487,10 +487,10 @@ h1{font-size:22px;margin:0;font-weight:900}
     padding:8px 8px;
     overflow:visible;
   }
-  .sync-title{margin:0;white-space:nowrap;font-size:12px}
+  .sync-title{margin:0;white-space:nowrap;font-size:14px}
   .sync-row{display:contents}
   .sync-row label{
-    font-size:11px;
+    font-size:13px;
     white-space:nowrap;
     display:flex;
     align-items:center;
@@ -498,10 +498,10 @@ h1{font-size:22px;margin:0;font-weight:900}
     gap:3px;
     min-width:0;
   }
-  .sync-row input[type="number"]{width:52px;min-width:48px;padding:6px 4px;font-size:11px}
+  .sync-row input[type="number"]{width:52px;min-width:48px;padding:6px 4px;font-size:13px}
   .sync-row input[type="checkbox"],.sync-row input[type="radio"]{width:14px;height:14px}
   .sync-btn{
-    font-size:11px;
+    font-size:13px;
     padding:8px 4px;
     min-height:34px;
     width:100%;
@@ -518,6 +518,48 @@ h1{font-size:22px;margin:0;font-weight:900}
   }
 }
 
+/* V3.6：手机端顶部两组控制按钮紧凑化 */
+@media (max-width:899px){
+  .wrap{padding:8px}
+  .all-grid,.multi-grid{gap:6px}
+  .multi{margin-top:6px;padding-top:6px}
+  .all-grid .btn,.multi-grid .btn{
+    min-height:24px;
+    padding:5px 4px;
+    border-radius:9px;
+    font-size:13px;
+    line-height:1.1;
+  }
+}
+
+/* V3.6：底部集群参数同步可折叠 */
+.syncbar{
+  transition:transform .22s ease;
+}
+.syncbar.collapsed{
+  transform:translateY(calc(100% - 10px));
+}
+.sync-toggle{
+  position:absolute;
+  left:50%;
+  top:-30px;
+  transform:translateX(-50%);
+  width:54px;
+  height:30px;
+  border:0;
+  border-radius:16px 16px 0 0;
+  background:#111827;
+  color:#fff;
+  font-size:18px;
+  font-weight:900;
+  line-height:1;
+  box-shadow:0 -2px 8px rgba(15,23,42,.18);
+}
+body.sync-collapsed{padding-bottom:42px}
+@media (min-width:900px){
+  body.sync-collapsed{padding-bottom:42px}
+}
+
 .small{font-size:13px;color:#667085}
 @media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 </style>
@@ -525,10 +567,9 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.4</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.6</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
-  <input id="serverBox" class="server" readonly>
   <div class="stats" id="stats">加载中...</div>
 </div>
 
@@ -544,7 +585,6 @@ h1{font-size:22px;margin:0;font-weight:900}
 
     <button class="btn dark" onclick="batchScreenshotAll()">全部批量截图</button>
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
-    <button class="btn gray" onclick="loadDevices()">刷新状态</button>
   </div>
 
   <div class="desktop-top-grid">
@@ -556,7 +596,6 @@ h1{font-size:22px;margin:0;font-weight:900}
     <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
     <button class="btn orange" onclick="sendAll('restart_app_start')">全部重启并启动</button>
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
-    <button class="btn gray" onclick="loadDevices()">刷新状态</button>
   </div>
 
   <div class="multi-grid multi mobile-only">
@@ -590,7 +629,8 @@ h1{font-size:22px;margin:0;font-weight:900}
 </div>
 
 
-<div class="syncbar">
+<div class="syncbar collapsed" id="syncbar">
+  <button class="sync-toggle" id="syncToggle" onclick="toggleSyncBar()" title="展开/隐藏集群参数同步">⬆️</button>
   <div class="sync-title">集群参数同步</div>
   <div class="sync-row">
     <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
@@ -626,7 +666,26 @@ const ADMIN_KEY = keyFromUrl || localStorage.getItem("ADMIN_KEY") || "";
 let DEVICES = [];
 let selected = new Set();
 
-document.getElementById("serverBox").value = SERVER;
+function setSyncBarCollapsed(collapsed){
+  const bar = document.getElementById("syncbar");
+  const btn = document.getElementById("syncToggle");
+  if(!bar || !btn) return;
+  bar.classList.toggle("collapsed", collapsed);
+  document.body.classList.toggle("sync-collapsed", collapsed);
+  btn.textContent = collapsed ? "⬆️" : "⬇️";
+  localStorage.setItem("SYNC_BAR_COLLAPSED", collapsed ? "1" : "0");
+}
+function toggleSyncBar(){
+  const bar = document.getElementById("syncbar");
+  const collapsed = !bar || !bar.classList.contains("collapsed") ? true : false;
+  setSyncBarCollapsed(collapsed);
+}
+document.addEventListener("DOMContentLoaded", ()=>{
+  const saved = localStorage.getItem("SYNC_BAR_COLLAPSED");
+  setSyncBarCollapsed(saved === null ? true : saved === "1");
+});
+
+
 
 function headers(){
   return {"Content-Type":"application/json","X-Admin-Key":ADMIN_KEY};
