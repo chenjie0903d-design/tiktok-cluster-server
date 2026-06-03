@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V3.0")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.4")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.7：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.4：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -161,12 +161,16 @@ def list_devices():
         item["online"] = now - item.get("last_seen", 0) <= 120
         item["last_seen_ago"] = int(now - item.get("last_seen", 0))
         if not item["online"]:
+            item["running"] = False
+        if not item["online"]:
             item["display_state"] = "offline"
         elif item.get("status") == "switching_ip":
             item["display_state"] = "switching_ip"
         elif item.get("status") == "screenshotting":
             # V36：如果已经收到截图，就不要一直显示截图中
             item["display_state"] = "online" if screenshots.get(item.get("machine_code")) else "screenshotting"
+        elif item.get("status") == "updating_package":
+            item["display_state"] = "updating_package"
         elif item.get("status") in ("starting_app", "restarting_app"):
             item["display_state"] = "online"
         else:
@@ -310,8 +314,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.7",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_7"]
+        "version": "v26-web-v4.4",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_4"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +385,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.7</title>
+<title>TikTok 集群控制台 Web V4.4</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -396,15 +400,6 @@ h1{font-size:22px;margin:0;font-weight:900}
 .refresh-btn{margin-left:auto;border:0;border-radius:12px;background:#eef2f7;padding:10px 14px;font-weight:800;color:#111827}
 .server{margin-top:10px;width:100%;border:1px solid #d0d5dd;border-radius:13px;padding:11px 12px;font-size:14px;background:#fff}
 .stats{margin-top:9px;color:var(--muted);font-size:16px;font-weight:800}
-.offline-cleaner{margin-top:8px;display:flex;align-items:center;gap:12px;color:#344054;font-size:15px;font-weight:800;flex-wrap:wrap}
-.offline-cleaner label{display:flex;align-items:center;gap:5px}
-.offline-cleaner input[type="checkbox"]{width:16px;height:16px;accent-color:#1d9bf0}
-.offline-cleaner input[type="number"]{width:64px;border:1px solid #d0d5dd;border-radius:8px;padding:5px 6px;font-size:15px;font-weight:800}
-@media (max-width:520px){
-  .offline-cleaner{font-size:13px;gap:8px}
-  .offline-cleaner input[type="number"]{width:58px;font-size:13px}
-}
-
 .wrap{padding:12px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .all-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
@@ -527,6 +522,281 @@ h1{font-size:22px;margin:0;font-weight:900}
   }
 }
 
+/* V3.6：手机端顶部两组控制按钮紧凑化 */
+@media (max-width:899px){
+  .wrap{padding:8px}
+  .all-grid,.multi-grid{gap:6px}
+  .multi{margin-top:6px;padding-top:6px}
+
+  /* 第一排批量控制按钮：保持紧凑 */
+  .all-grid .btn{
+    min-height:24px;
+    padding:5px 4px;
+    border-radius:9px;
+    font-size:13px;
+    line-height:1.1;
+  }
+
+  /* 第二排单选控制按钮：比 V3.6 增高 0.5 倍 */
+  .multi-grid .btn{
+    min-height:36px;
+    padding:8px 5px;
+    border-radius:10px;
+    font-size:13px;
+    line-height:1.15;
+  }
+}
+
+/* V3.6：底部集群参数同步可折叠 */
+.syncbar{
+  transition:transform .22s ease;
+}
+.syncbar.collapsed{
+  transform:translateY(calc(100% - 10px));
+}
+.sync-toggle{
+  position:absolute;
+  left:50%;
+  top:-30px;
+  transform:translateX(-50%);
+  width:54px;
+  height:30px;
+  border:0;
+  border-radius:16px 16px 0 0;
+  background:#111827;
+  color:#fff;
+  font-size:18px;
+  font-weight:900;
+  line-height:1;
+  box-shadow:0 -2px 8px rgba(15,23,42,.18);
+}
+body.sync-collapsed{padding-bottom:42px}
+@media (min-width:900px){
+  body.sync-collapsed{padding-bottom:42px}
+}
+
+/* V3.8：手机端顶部控制区默认隐藏，可展开/隐藏 */
+@media (max-width:899px){
+    .mobile-control-section.collapsed{
+    display:none !important;
+  }
+  #mobileSelectedControls .wide{
+    grid-column:span 2;
+  }
+}
+
+/* V3.9：同步参数确认弹窗居中 */
+.dialog-modal{
+  position:fixed;
+  inset:0;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  background:rgba(15,23,42,.35);
+  z-index:120;
+  padding:18px;
+}
+.dialog-modal.show{display:flex}
+.dialog-box{
+  width:min(420px,92vw);
+  background:#fff;
+  border-radius:16px;
+  box-shadow:0 12px 36px rgba(15,23,42,.25);
+  padding:18px;
+  text-align:center;
+}
+.dialog-text{
+  font-size:17px;
+  font-weight:800;
+  color:#111827;
+  line-height:1.45;
+  margin:6px 0 16px;
+}
+.dialog-actions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.dialog-actions.single{grid-template-columns:1fr}
+.dialog-actions button{
+  border:0;
+  border-radius:12px;
+  padding:11px 12px;
+  font-size:15px;
+  font-weight:900;
+}
+.dialog-cancel{background:#e5e7eb;color:#111827}
+.dialog-ok{background:#1d9bf0;color:#fff}
+.two-line{display:inline-block;line-height:1.12}
+@media (max-width:899px){
+  .device-restart-start .two-line{line-height:1.05}
+}
+
+/* V4.2：远程软件更新包，两行四列等分 */
+.package-section{
+  grid-column:1 / -1;
+  border-top:1px solid #e5e7eb;
+  margin-top:8px;
+  padding-top:8px;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;
+  align-items:center;
+}
+.package-section label,
+.package-section .pkg-checks{
+  font-size:13px;
+  font-weight:800;
+  color:#111827;
+}
+.package-section .pkg-field{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:center;
+  gap:6px;
+  white-space:nowrap;
+  min-width:0;
+}
+.package-section input[type="text"]{
+  width:100%;
+  min-width:0;
+  border:1px solid #d0d5dd;
+  border-radius:8px;
+  padding:7px 6px;
+  font-size:13px;
+}
+.package-section input[type="checkbox"]{
+  width:15px;
+  height:15px;
+  accent-color:#1d9bf0;
+}
+.package-section .pkg-checks{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  align-items:center;
+  min-width:0;
+}
+.package-section .pkg-checks label{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  white-space:nowrap;
+}
+.pkg-btn{
+  border:0;
+  border-radius:9px;
+  padding:9px 6px;
+  font-size:13px;
+  font-weight:900;
+  color:#fff;
+  background:#465465;
+  white-space:nowrap;
+  width:100%;
+  min-height:38px;
+}
+.pkg-btn.primary{background:#1d9bf0}
+.pkg-btn.green{background:#1db954}
+@media (max-width:899px){
+  .package-section{
+    grid-template-columns:1fr;
+    gap:7px;
+  }
+  .package-section .pkg-field{
+    grid-template-columns:78px minmax(0,1fr);
+    gap:7px;
+  }
+  .package-section label,
+  .package-section .pkg-checks{
+    font-size:13px;
+  }
+  .package-section input[type="text"]{
+    font-size:13px;
+    padding:8px 6px;
+  }
+  .package-section .pkg-checks{
+    grid-template-columns:1fr 1fr;
+  }
+  .pkg-btn{
+    font-size:13px;
+    min-height:36px;
+  }
+}
+
+
+/* V4.2：手机端底部同步按钮等高，两行文字 */
+.sync-btn .two-line{
+  display:inline-block;
+  line-height:1.08;
+}
+@media (max-width:899px){
+  .sync-row .sync-btn{
+    min-height:44px;
+    height:44px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    line-height:1.08;
+  }
+  .sync-row .sync-select-online,
+  .sync-row .sync-clear{
+    min-height:44px;
+    height:44px;
+  }
+}
+@media (min-width:900px){
+  .sync-row .sync-btn{
+    min-height:36px;
+    height:36px;
+    display:flex !important;
+    align-items:center;
+    justify-content:center;
+    line-height:1.08;
+  }
+}
+
+
+/* V4.3：顶部展开/隐藏移到刷新左侧，去掉版本徽标 */
+.ver{display:none !important}
+.mobile-header-toggle{
+  margin-left:auto;
+  border:0;
+  border-radius:12px;
+  background:#eef2f7;
+  padding:10px 12px;
+  font-size:22px;
+  font-weight:900;
+  color:#111827;
+  line-height:1;
+}
+.mobile-header-toggle + .refresh-btn{
+  margin-left:6px;
+}
+.refresh-btn{
+  font-size:22px;
+  font-weight:900;
+  line-height:1;
+}
+@media (min-width:900px){
+  .refresh-btn{
+    font-size:22px;
+    font-weight:900;
+  }
+}
+@media (max-width:899px){
+  .title-row{
+    gap:6px;
+  }
+  .mobile-header-toggle,
+  .refresh-btn{
+    min-height:42px;
+    padding:9px 10px;
+    font-size:22px;
+    border-radius:12px;
+    white-space:nowrap;
+  }
+}
+
 .small{font-size:13px;color:#667085}
 @media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 
@@ -547,25 +817,34 @@ h1{font-size:22px;margin:0;font-weight:900}
   box-shadow:0 1px 3px rgba(0,0,0,.18);
 }
 .seq-del:hover{background:#d92d20}
-.input-modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:120;padding:18px}
-.input-modal.show{display:flex}
-.input-box{width:min(420px,92vw);background:#fff;border-radius:16px;padding:18px;box-shadow:0 12px 34px rgba(15,23,42,.28)}
-.input-title{font-size:18px;font-weight:900;margin-bottom:12px;color:#111827}
-.input-field{width:100%;border:1px solid #d0d5dd;border-radius:12px;padding:12px;font-size:16px;font-weight:700;outline:none}
-.input-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
-.input-actions button{border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:900}
-.input-ok{background:#1d9bf0;color:#fff}
-.input-cancel{background:#e5e7eb;color:#111827}
+.offline-cleaner{margin-top:8px;display:flex;align-items:center;gap:12px;color:#344054;font-size:15px;font-weight:800;flex-wrap:wrap}
+.offline-cleaner label{display:flex;align-items:center;gap:5px}
+.offline-cleaner input[type="checkbox"]{width:16px;height:16px;accent-color:#1d9bf0}
+.offline-cleaner input[type="number"]{width:64px;border:1px solid #d0d5dd;border-radius:8px;padding:5px 6px;font-size:15px;font-weight:800}
+.dialog-input{
+  width:100%;
+  border:1px solid #d0d5dd;
+  border-radius:12px;
+  padding:12px;
+  font-size:16px;
+  font-weight:700;
+  outline:none;
+  margin:2px 0 14px;
+}
+@media (max-width:520px){
+  .offline-cleaner{font-size:13px;gap:8px}
+  .offline-cleaner input[type="number"]{width:58px;font-size:13px}
+}
 
 </style>
 </head>
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.7</span>
+    <h1>TikTok 集群控制台</h1>
+    <button class="mobile-header-toggle mobile-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
-  <input id="serverBox" class="server" readonly>
   <div class="stats" id="stats">加载中...</div>
   <div class="offline-cleaner">
     <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
@@ -574,7 +853,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 </div>
 
 <div class="wrap">
-  <div class="all-grid mobile-only">
+  <div id="mobileAllControls" class="all-grid mobile-only mobile-control-section collapsed">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
     <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
@@ -598,10 +877,7 @@ h1{font-size:22px;margin:0;font-weight:900}
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
   </div>
 
-  <div class="multi-grid multi mobile-only">
-    <button class="btn gray wide" onclick="selectOnline()">多选在线</button>
-    <button class="btn gray wide" onclick="clearSelected()">取消选择</button>
-
+  <div id="mobileSelectedControls" class="multi-grid multi mobile-only mobile-control-section collapsed">
     <button class="btn blue" onclick="sendSelected('open_target')">打开</button>
     <button class="btn blue" onclick="sendSelected('start_target')">启动</button>
     <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
@@ -611,6 +887,9 @@ h1{font-size:22px;margin:0;font-weight:900}
     <button class="btn orange" onclick="sendSelected('restart_app_only')">重启</button>
     <button class="btn orange" onclick="sendSelected('restart_app_start')">重启后启动</button>
     <button class="btn dark" onclick="sendSelected('update_github_config')">更新GitHub</button>
+
+    <button class="btn gray wide" onclick="selectOnline()">多选在线</button>
+    <button class="btn gray wide" onclick="clearSelected()">取消选择</button>
   </div>
 
   <div class="desktop-action-grid">
@@ -629,36 +908,52 @@ h1{font-size:22px;margin:0;font-weight:900}
 </div>
 
 
-<div class="syncbar">
+<div class="syncbar collapsed" id="syncbar">
+  <button class="sync-toggle" id="syncToggle" onclick="toggleSyncBar()" title="展开/隐藏集群参数同步">⬆️</button>
   <div class="sync-title">集群参数同步</div>
   <div class="sync-row">
     <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
     <label class="sync-network">网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
-    <label class="sync-blue">蓝色不变切IP <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
+    <label class="sync-blue">蓝色不变切IP <input id="sync_blue_no_change_auto_ip" type="number" value="310"></label>
     <label class="sync-ocr">OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
   <div class="sync-row">
     <label class="sync-norestart">时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
     <label class="sync-restartthen"><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
-    <label class="sync-restartdelay">重启延迟 <input id="sync_restart_open_delay" type="number" value="2"></label>
-    <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="6"></label>
+    <label class="sync-restartdelay">重启延迟 <input id="sync_restart_open_delay" type="number" value="3"></label>
+    <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="5"></label>
   </div>
   <div class="sync-row">
-    <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()">保存并同步选中</button>
-    <button class="sync-btn green sync-save-all" onclick="syncConfigAll()">保存并同步全部</button>
+    <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()"><span class="two-line">保存并<br>同步选中</span></button>
+    <button class="sync-btn green sync-save-all" onclick="syncConfigAll()"><span class="two-line">保存并<br>同步全部</span></button>
     <button class="sync-btn sync-select-online" onclick="selectOnline()">多选在线</button>
     <button class="sync-btn sync-clear" onclick="clearSelected()">取消选择</button>
+  </div>
+
+  <div class="package-section">
+    <label class="pkg-field pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
+    <label class="pkg-field pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe"></label>
+    <label class="pkg-field pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写；不要带 sha256: 前缀"></label>
+    <label class="pkg-field pkg-folder">文件夹名 <input id="pkg_folder" type="text" placeholder="留空=按zip顶层文件夹"></label>
+
+    <label class="pkg-field pkg-title">窗口标题 <input id="pkg_title" type="text" placeholder="新版窗口标题，可空"></label>
+    <div class="pkg-checks">
+      <label><input id="pkg_launch" type="checkbox" checked>解压后打开</label>
+      <label><input id="pkg_start" type="checkbox">打开后启动</label>
+    </div>
+    <button class="pkg-btn primary" onclick="updatePackageSelected()">更新选中</button>
+    <button class="pkg-btn green" onclick="updatePackageAll()">更新全部在线</button>
   </div>
 </div>
 
 
-<div id="inputModal" class="input-modal" onclick="closeInputModal(false)">
-  <div class="input-box" onclick="event.stopPropagation()">
-    <div id="inputModalTitle" class="input-title">输入内容</div>
-    <input id="inputModalField" class="input-field" autocomplete="off">
-    <div class="input-actions">
-      <button class="input-cancel" onclick="closeInputModal(false)">取消</button>
-      <button class="input-ok" onclick="closeInputModal(true)">确定</button>
+<div id="centerDialog" class="dialog-modal">
+  <div class="dialog-box">
+    <div id="dialogText" class="dialog-text"></div>
+    <input id="dialogInput" class="dialog-input" style="display:none" autocomplete="off">
+    <div id="dialogActions" class="dialog-actions">
+      <button id="dialogCancel" class="dialog-cancel">取消</button>
+      <button id="dialogOk" class="dialog-ok">确定</button>
     </div>
   </div>
 </div>
@@ -700,7 +995,98 @@ function shouldHideOfflineDevice(d){
 }
 
 
-document.getElementById("serverBox").value = SERVER;
+function centerDialog(message, options={}){
+  return new Promise(resolve=>{
+    const modal = document.getElementById("centerDialog");
+    const text = document.getElementById("dialogText");
+    const actions = document.getElementById("dialogActions");
+    const cancel = document.getElementById("dialogCancel");
+    const ok = document.getElementById("dialogOk");
+    const input = document.getElementById("dialogInput");
+    const confirmMode = options.confirm !== false;
+    const inputMode = options.input === true;
+    text.textContent = message;
+    actions.classList.toggle("single", !confirmMode);
+    cancel.style.display = confirmMode ? "" : "none";
+    ok.textContent = options.okText || "确定";
+    cancel.textContent = options.cancelText || "取消";
+    if(input){
+      input.style.display = inputMode ? "" : "none";
+      input.value = inputMode ? (options.defaultValue || "") : "";
+    }
+
+    const cleanup = (val)=>{
+      modal.classList.remove("show");
+      ok.onclick = null;
+      cancel.onclick = null;
+      if(input) input.onkeydown = null;
+      resolve(val);
+    };
+    ok.onclick = ()=>cleanup(inputMode ? (input ? input.value.trim() : "") : true);
+    cancel.onclick = ()=>cleanup(inputMode ? "" : false);
+    if(input){
+      input.onkeydown = (e)=>{
+        if(e.key === "Enter"){ e.preventDefault(); ok.click(); }
+        if(e.key === "Escape"){ e.preventDefault(); cancel.click(); }
+      };
+    }
+    modal.classList.add("show");
+    if(inputMode && input){
+      setTimeout(()=>{ input.focus(); input.select(); }, 50);
+    }
+  });
+}
+function centerAlert(message){
+  return centerDialog(message, {confirm:false, okText:"知道了"});
+}
+function centerConfirm(message){
+  return centerDialog(message, {confirm:true, okText:"确定", cancelText:"取消"});
+}
+function centerPrompt(message, defaultValue=""){
+  return centerDialog(message, {confirm:true, input:true, defaultValue, okText:"确定", cancelText:"取消"});
+}
+
+
+function setMobileControlsCollapsed(collapsed){
+  const allBox = document.getElementById("mobileAllControls");
+  const selBox = document.getElementById("mobileSelectedControls");
+  const btn = document.getElementById("mobileControlsToggle");
+  if(allBox) allBox.classList.toggle("collapsed", collapsed);
+  if(selBox) selBox.classList.toggle("collapsed", collapsed);
+  if(btn) btn.textContent = collapsed ? "⬇️ 展开" : "⬆️ 隐藏";
+  localStorage.setItem("MOBILE_CONTROLS_COLLAPSED", collapsed ? "1" : "0");
+}
+function toggleMobileControls(){
+  const allBox = document.getElementById("mobileAllControls");
+  const collapsed = !allBox || allBox.classList.contains("collapsed");
+  setMobileControlsCollapsed(!collapsed);
+}
+document.addEventListener("DOMContentLoaded", ()=>{
+  const saved = localStorage.getItem("MOBILE_CONTROLS_COLLAPSED");
+  setMobileControlsCollapsed(saved === null ? true : saved === "1");
+});
+
+
+function setSyncBarCollapsed(collapsed){
+  const bar = document.getElementById("syncbar");
+  const btn = document.getElementById("syncToggle");
+  if(!bar || !btn) return;
+  bar.classList.toggle("collapsed", collapsed);
+  document.body.classList.toggle("sync-collapsed", collapsed);
+  btn.textContent = collapsed ? "⬆️" : "⬇️";
+  localStorage.setItem("SYNC_BAR_COLLAPSED", collapsed ? "1" : "0");
+}
+function toggleSyncBar(){
+  const bar = document.getElementById("syncbar");
+  const collapsed = !bar || !bar.classList.contains("collapsed") ? true : false;
+  setSyncBarCollapsed(collapsed);
+}
+document.addEventListener("DOMContentLoaded", ()=>{
+  const saved = localStorage.getItem("SYNC_BAR_COLLAPSED");
+  setSyncBarCollapsed(saved === null ? true : saved === "1");
+});
+
+
 
 function headers(){
   return {"Content-Type":"application/json","X-Admin-Key":ADMIN_KEY};
@@ -722,7 +1108,7 @@ function stateClass(d){
   if(!d.online) return "offline";
   if(isBadCarrier(d)) return "bad";
   if(d.running) return "running";
-  if(["screenshotting","switching_ip"].includes(d.display_state||d.status)) return "busy";
+  if(["screenshotting","switching_ip","updating_package"].includes(d.display_state||d.status)) return "busy";
   return "";
 }
 
@@ -750,6 +1136,7 @@ function stateText(d){
   const s = d.display_state || d.status || "online";
   if(s==="switching_ip") return "切IP中";
   if(s==="screenshotting") return d.has_screenshot ? "在线" : "截图中";
+  if(s==="updating_package") return "更新中";
   return "在线";
 }
 function render(){
@@ -800,7 +1187,7 @@ function render(){
         <button class="btn dark" onclick="renameOne('${code}')">改名</button>
         <button class="btn dark" onclick="sendOne('${code}','screenshot', true)">截图</button>
         <button class="btn orange" onclick="sendOne('${code}','restart_app_only')">重启</button>
-        <button class="btn orange" onclick="sendOne('${code}','restart_app_start')">重启后启动</button>
+        <button class="btn orange device-restart-start" onclick="sendOne('${code}','restart_app_start')"><span class="two-line">重启后<br>启动</span></button>
       </div>
       ${thumb}
       </div>
@@ -860,59 +1247,26 @@ async function sendSelected(cmd){
 async function screenshotSelected(){ await sendSelected("screenshot"); }
 async function batchScreenshotAll(){ await sendAll("screenshot"); setTimeout(loadDevices, 4500); setTimeout(loadDevices, 8500); setTimeout(loadDevices, 12500); }
 
-
-let inputModalResolve = null;
-function openInputModal(title, defaultValue=""){
-  return new Promise(resolve=>{
-    inputModalResolve = resolve;
-    const modal = document.getElementById("inputModal");
-    const titleEl = document.getElementById("inputModalTitle");
-    const field = document.getElementById("inputModalField");
-    titleEl.textContent = title || "输入内容";
-    field.value = defaultValue || "";
-    modal.classList.add("show");
-    setTimeout(()=>{ field.focus(); field.select(); }, 50);
-  });
-}
-function closeInputModal(ok){
-  const modal = document.getElementById("inputModal");
-  const field = document.getElementById("inputModalField");
-  modal.classList.remove("show");
-  const val = ok ? field.value.trim() : "";
-  if(inputModalResolve){
-    inputModalResolve(val);
-    inputModalResolve = null;
-  }
-}
-document.addEventListener("keydown", e=>{
-  const modal = document.getElementById("inputModal");
-  if(modal && modal.classList.contains("show")){
-    if(e.key === "Enter"){ e.preventDefault(); closeInputModal(true); }
-    if(e.key === "Escape"){ e.preventDefault(); closeInputModal(false); }
-  }
-});
-
 async function deleteDeviceConfirm(event, code){
   if(event) event.stopPropagation();
   const d = DEVICES.find(x=>x.machine_code===code) || {};
   const name = d.device_name || code.slice(0,8) || "未命名";
   const ago = agoText(d);
-  if(!confirm(`确定删除这个设备记录吗？\n\n设备：${name}\n状态：${ago}\n\n删除后网页不再显示，设备重新上线后会重新出现。`)) return;
+  if(!await centerConfirm(`确定删除这个设备记录吗？\n\n设备：${name}\n状态：${ago}\n\n删除后网页不再显示，设备重新上线后会重新出现。`)) return;
   try{
     await api(`/api/devices/${encodeURIComponent(code)}`, {method:"DELETE"});
     selected.delete(code);
     await loadDevices();
   }catch(e){
-    alert("删除失败：" + e.message);
+    await centerAlert("删除失败：" + e.message);
   }
 }
-
 
 async function renameSelected(){
   const list = [...selected];
   if(list.length===0){ alert("请先勾选设备"); return; }
   if(list.length===1){ return renameOne(list[0]); }
-  const base = await openInputModal(`已选择 ${list.length} 台设备，输入批量基础名称：`, "");
+  const base = await centerPrompt(`已选择 ${list.length} 台设备，输入批量基础名称：`, "");
   if(!base) return;
   let i = 1;
   try{
@@ -930,7 +1284,7 @@ async function renameSelected(){
 
 async function renameOne(code){
   const d = DEVICES.find(x=>x.machine_code===code) || {};
-  const name = await openInputModal("输入新设备名称：", d.device_name || "");
+  const name = await centerPrompt("输入新设备名称：", d.device_name || "");
   if(!name) return;
   try{
     await api(`/api/devices/${encodeURIComponent(code)}/command`,{method:"POST",body:JSON.stringify({command:"rename",value:name})});
@@ -942,8 +1296,10 @@ async function renameOne(code){
   }catch(e){ alert("改名失败：" + e.message); }
 }
 function showShot(code){
+  const d = DEVICES.find(x=>x.machine_code===code) || {};
+  const t = d.screenshot_time || 0;
   const img = document.getElementById("modalImg");
-  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}`;
+  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${t}`;
   document.getElementById("imgModal").classList.add("show");
 }
 function closeModal(){
@@ -958,16 +1314,16 @@ function getSyncConfig(){
   return {
     switch_ip: Number(document.getElementById("sync_cut_ip").value || 5),
     network_mode: networkEl ? networkEl.value : "5G",
-    auto_switch_ip_keep_blue: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210),
+    auto_switch_ip_keep_blue: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 310),
     ocr_interval: Number(document.getElementById("sync_ocr_interval").value || 30),
     check_interval_no_response: noResp,
     no_restart_when_duration_ok: noResp,
     restart_after_launch: document.getElementById("sync_restart_then_start").checked,
     restart_then_start: document.getElementById("sync_restart_then_start").checked,
-    restart_launch_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
-    restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
-    start_click_delay: Number(document.getElementById("sync_start_clicks").value || 6),
-    start_clicks: Number(document.getElementById("sync_start_clicks").value || 6)
+    restart_launch_delay: Number(document.getElementById("sync_restart_open_delay").value || 3),
+    restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 3),
+    start_click_delay: Number(document.getElementById("sync_start_clicks").value || 5),
+    start_clicks: Number(document.getElementById("sync_start_clicks").value || 5)
   };
 }
 async function syncConfigOne(code, cfg){
@@ -978,24 +1334,78 @@ async function syncConfigOne(code, cfg){
 }
 async function syncConfigSelected(){
   const list = [...selected];
-  if(list.length===0){ alert("请先勾选设备"); return; }
+  if(list.length===0){ await centerAlert("请先勾选设备"); return; }
   const cfg = getSyncConfig();
-  if(!confirm(`确定同步参数到选中的 ${list.length} 台设备？`)) return;
+  if(!await centerConfirm(`确定同步参数到选中的 ${list.length} 台设备？`)) return;
   try{
     for(const code of list){ await syncConfigOne(code, cfg); }
-    alert("已同步选中设备");
+    await centerAlert("已同步选中设备");
     setTimeout(loadDevices,1000);
-  }catch(e){ alert("同步失败：" + e.message); }
+  }catch(e){ await centerAlert("同步失败：" + e.message); }
 }
 async function syncConfigAll(){
   const cfg = getSyncConfig();
-  if(!confirm("确定同步参数到全部在线设备？")) return;
+  if(!await centerConfirm("确定同步参数到全部在线设备？")) return;
   try{
     const data = await api("/api/config/all",{method:"POST",body:JSON.stringify({config:cfg})});
-    alert(`已同步全部在线设备，数量：${data.count||0}`);
+    await centerAlert(`已同步全部在线设备，数量：${data.count||0}`);
     setTimeout(loadDevices,1000);
-  }catch(e){ alert("同步失败：" + e.message); }
+  }catch(e){ await centerAlert("同步失败：" + e.message); }
 }
+
+
+function getPackageConfig(){
+  return {
+    package_url: document.getElementById("pkg_url").value.trim(),
+    sha256: document.getElementById("pkg_sha256").value.trim(),
+    folder_name: document.getElementById("pkg_folder").value.trim(),
+    exe_name: document.getElementById("pkg_exe").value.trim(),
+    window_title: document.getElementById("pkg_title").value.trim(),
+    extract_base: "desktop",
+    auto_launch: document.getElementById("pkg_launch").checked,
+    auto_click_start: document.getElementById("pkg_start").checked
+  };
+}
+function validatePackageConfig(cfg){
+  if(!cfg.package_url) return "请先填写更新包URL";
+  if(!/\.zip($|\?)/i.test(cfg.package_url)) return "目前远程更新只支持 .zip，建议把 rar 重新压成 zip";
+  if(!cfg.exe_name) return "请填写主程序 EXE 名，必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe";
+  if(!/\.exe$/i.test(cfg.exe_name)) return "EXE名必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe";
+  return "";
+}
+async function updatePackageSelected(){
+  const list = [...selected];
+  if(list.length===0){ await centerAlert("请先勾选设备"); return; }
+  const cfg = getPackageConfig();
+  const err = validatePackageConfig(cfg);
+  if(err){ await centerAlert(err); return; }
+  if(!await centerConfirm(`确定给选中的 ${list.length} 台设备远程更新软件包？\n\n默认解压到客户端桌面。`)) return;
+  try{
+    for(const code of list){
+      await api(`/api/devices/${encodeURIComponent(code)}/command`,{
+        method:"POST",
+        body:JSON.stringify({command:"update_package", value:JSON.stringify(cfg)})
+      });
+    }
+    await centerAlert("已下发远程更新包命令");
+    setTimeout(loadDevices, 1000);
+  }catch(e){ await centerAlert("下发失败：" + e.message); }
+}
+async function updatePackageAll(){
+  const cfg = getPackageConfig();
+  const err = validatePackageConfig(cfg);
+  if(err){ await centerAlert(err); return; }
+  if(!await centerConfirm("确定给全部在线设备远程更新软件包？\n\n默认解压到客户端桌面。")) return;
+  try{
+    const data = await api("/api/commands/all",{
+      method:"POST",
+      body:JSON.stringify({command:"update_package", value:JSON.stringify(cfg)})
+    });
+    await centerAlert(`已下发远程更新包命令，数量：${data.count||0}`);
+    setTimeout(loadDevices, 1000);
+  }catch(e){ await centerAlert("下发失败：" + e.message); }
+}
+
 
 loadOfflineCleaner();
 loadDevices();
@@ -1017,35 +1427,7 @@ def mobile_admin(request: Request, key: Optional[str] = None):
     if not admin_auth_ok(request, key):
         return HTMLResponse("""
         <html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
-        <style>body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px}input,button{font-size:18px;padding:12px;border-radius:10px;margin-top:10px;width:100%}
-.seq-del{
-  position:absolute;
-  right:17px;
-  top:50px;
-  width:24px;
-  height:24px;
-  border:0;
-  border-radius:999px;
-  background:#ff4d4f;
-  color:#fff;
-  font-weight:900;
-  font-size:15px;
-  line-height:24px;
-  cursor:pointer;
-  box-shadow:0 1px 3px rgba(0,0,0,.18);
-}
-.seq-del:hover{background:#d92d20}
-.input-modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:120;padding:18px}
-.input-modal.show{display:flex}
-.input-box{width:min(420px,92vw);background:#fff;border-radius:16px;padding:18px;box-shadow:0 12px 34px rgba(15,23,42,.28)}
-.input-title{font-size:18px;font-weight:900;margin-bottom:12px;color:#111827}
-.input-field{width:100%;border:1px solid #d0d5dd;border-radius:12px;padding:12px;font-size:16px;font-weight:700;outline:none}
-.input-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
-.input-actions button{border:0;border-radius:12px;padding:12px;font-size:16px;font-weight:900}
-.input-ok{background:#1d9bf0;color:#fff}
-.input-cancel{background:#e5e7eb;color:#111827}
-
-</style></head>
+        <style>body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px}input,button{font-size:18px;padding:12px;border-radius:10px;margin-top:10px;width:100%}</style></head>
         <body><h2>请输入控制台密码</h2><input id='k' placeholder='ADMIN_KEY' type='password'><button onclick='go()'>进入</button>
         <script>function go(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)}</script></body></html>
         """, status_code=401)
