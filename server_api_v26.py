@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.7")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.8")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V4.7：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.8：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -314,8 +314,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v4.7",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_7"]
+        "version": "v26-web-v4.8",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_8"]
     }
 
 @app.get("/api/debug/devices")
@@ -385,7 +385,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V4.7</title>
+<title>TikTok 集群控制台 Web V4.8</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -999,6 +999,37 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+
+/* V4.8：手机端顶部细调 */
+@media (max-width:899px){
+  .header-status-row .stats{
+    font-size:17px !important;
+    font-weight:900 !important;
+    color:#1d9bf0 !important;
+  }
+  .header-status-row .offline-cleaner,
+  .header-status-row .offline-cleaner label{
+    font-size:17px !important;
+    font-weight:900 !important;
+    color:#1d9bf0 !important;
+  }
+  .header-status-row .offline-cleaner input[type="number"]{
+    width:35px !important;
+    min-width:35px !important;
+    max-width:35px !important;
+    font-size:17px !important;
+    font-weight:900 !important;
+    padding-left:3px !important;
+    padding-right:3px !important;
+    text-align:center !important;
+  }
+  .header-status-row .refresh-btn,
+  .header-status-row .mobile-header-toggle{
+    font-size:19px !important;
+    font-weight:900 !important;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -1306,13 +1337,25 @@ function stateText(d){
   if(s==="updating_package") return "更新中";
   return "在线";
 }
+
+function isMobileView(){
+  return window.matchMedia && window.matchMedia("(max-width:899px)").matches;
+}
+function buildStatsText(deviceText, online, running){
+  const t = new Date().toLocaleTimeString();
+  if(isMobileView()){
+    return `设备 ${deviceText}，在线 ${online}，监控 ${running}，刷新时间 ${t}`;
+  }
+  return `设备：${deviceText}，在线：${online}，监控：${running}，刷新时间：${t}`;
+}
+
 function render(){
   const visibleDevices = DEVICES.filter(d=>!shouldHideOfflineDevice(d));
   const online = visibleDevices.filter(d=>d.online).length;
   const running = visibleDevices.filter(d=>d.online && d.running).length;
   const hiddenCount = DEVICES.length - visibleDevices.length;
   const deviceText = hiddenCount > 0 ? `${visibleDevices.length}/${DEVICES.length}` : `${visibleDevices.length}`;
-  document.getElementById("stats").textContent = `设备：${deviceText}，在线：${online}，监控：${running}，刷新时间：${new Date().toLocaleTimeString()}`;
+  document.getElementById("stats").textContent = buildStatsText(deviceText, online, running);
   const cards = document.getElementById("cards");
   cards.innerHTML = "";
   for(const [idx,d] of visibleDevices.entries()){
