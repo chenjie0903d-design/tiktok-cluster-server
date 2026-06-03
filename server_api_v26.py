@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.2")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.3")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V4.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.3：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -312,8 +312,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v4.2",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_2"]
+        "version": "v26-web-v4.3",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_3"]
     }
 
 @app.get("/api/debug/devices")
@@ -383,7 +383,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V4.2</title>
+<title>TikTok 集群控制台 Web V4.3</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -575,20 +575,7 @@ body.sync-collapsed{padding-bottom:42px}
 
 /* V3.8：手机端顶部控制区默认隐藏，可展开/隐藏 */
 @media (max-width:899px){
-  .mobile-control-toggle-row{
-    display:grid;
-    grid-template-columns:1fr;
-    gap:6px;
-    margin-bottom:6px;
-  }
-  .mobile-control-toggle-row .btn{
-    min-height:30px;
-    padding:6px 8px;
-    border-radius:9px;
-    font-size:13px;
-    font-weight:900;
-  }
-  .mobile-control-section.collapsed{
+    .mobile-control-section.collapsed{
     display:none !important;
   }
   #mobileSelectedControls .wide{
@@ -766,6 +753,48 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+
+/* V4.3：顶部展开/隐藏移到刷新左侧，去掉版本徽标 */
+.ver{display:none !important}
+.mobile-header-toggle{
+  margin-left:auto;
+  border:0;
+  border-radius:12px;
+  background:#eef2f7;
+  padding:10px 12px;
+  font-size:22px;
+  font-weight:900;
+  color:#111827;
+  line-height:1;
+}
+.mobile-header-toggle + .refresh-btn{
+  margin-left:6px;
+}
+.refresh-btn{
+  font-size:22px;
+  font-weight:900;
+  line-height:1;
+}
+@media (min-width:900px){
+  .refresh-btn{
+    font-size:22px;
+    font-weight:900;
+  }
+}
+@media (max-width:899px){
+  .title-row{
+    gap:6px;
+  }
+  .mobile-header-toggle,
+  .refresh-btn{
+    min-height:42px;
+    padding:9px 10px;
+    font-size:22px;
+    border-radius:12px;
+    white-space:nowrap;
+  }
+}
+
 .small{font-size:13px;color:#667085}
 @media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 </style>
@@ -773,16 +802,14 @@ body.sync-collapsed{padding-bottom:42px}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V4.2</span>
+    <h1>TikTok 集群控制台</h1>
+    <button class="mobile-header-toggle mobile-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <div class="stats" id="stats">加载中...</div>
 </div>
 
 <div class="wrap">
-  <div class="mobile-control-toggle-row mobile-only">
-    <button class="btn gray" id="mobileControlsToggle" onclick="toggleMobileControls()">展开控制 ⬇️</button>
-  </div>
   <div id="mobileAllControls" class="all-grid mobile-only mobile-control-section collapsed">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
@@ -844,14 +871,14 @@ body.sync-collapsed{padding-bottom:42px}
   <div class="sync-row">
     <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
     <label class="sync-network">网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
-    <label class="sync-blue">蓝色不变切IP <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
+    <label class="sync-blue">蓝色不变切IP <input id="sync_blue_no_change_auto_ip" type="number" value="310"></label>
     <label class="sync-ocr">OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
   <div class="sync-row">
     <label class="sync-norestart">时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
     <label class="sync-restartthen"><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
-    <label class="sync-restartdelay">重启延迟 <input id="sync_restart_open_delay" type="number" value="2"></label>
-    <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="6"></label>
+    <label class="sync-restartdelay">重启延迟 <input id="sync_restart_open_delay" type="number" value="3"></label>
+    <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="5"></label>
   </div>
   <div class="sync-row">
     <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()"><span class="two-line">保存并<br>同步选中</span></button>
@@ -940,7 +967,7 @@ function setMobileControlsCollapsed(collapsed){
   const btn = document.getElementById("mobileControlsToggle");
   if(allBox) allBox.classList.toggle("collapsed", collapsed);
   if(selBox) selBox.classList.toggle("collapsed", collapsed);
-  if(btn) btn.textContent = collapsed ? "展开控制 ⬇️" : "隐藏控制 ⬆️";
+  if(btn) btn.textContent = collapsed ? "⬇️ 展开" : "⬆️ 隐藏";
   localStorage.setItem("MOBILE_CONTROLS_COLLAPSED", collapsed ? "1" : "0");
 }
 function toggleMobileControls(){
@@ -1182,16 +1209,16 @@ function getSyncConfig(){
   return {
     switch_ip: Number(document.getElementById("sync_cut_ip").value || 5),
     network_mode: networkEl ? networkEl.value : "5G",
-    auto_switch_ip_keep_blue: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210),
+    auto_switch_ip_keep_blue: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 310),
     ocr_interval: Number(document.getElementById("sync_ocr_interval").value || 30),
     check_interval_no_response: noResp,
     no_restart_when_duration_ok: noResp,
     restart_after_launch: document.getElementById("sync_restart_then_start").checked,
     restart_then_start: document.getElementById("sync_restart_then_start").checked,
-    restart_launch_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
-    restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
-    start_click_delay: Number(document.getElementById("sync_start_clicks").value || 6),
-    start_clicks: Number(document.getElementById("sync_start_clicks").value || 6)
+    restart_launch_delay: Number(document.getElementById("sync_restart_open_delay").value || 3),
+    restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 3),
+    start_click_delay: Number(document.getElementById("sync_start_clicks").value || 5),
+    start_clicks: Number(document.getElementById("sync_start_clicks").value || 5)
   };
 }
 async function syncConfigOne(code, cfg){
