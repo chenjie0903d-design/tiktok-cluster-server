@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.6")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.7")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V4.6：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.7：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -314,8 +314,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v4.6",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_6"]
+        "version": "v26-web-v4.7",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_7"]
     }
 
 @app.get("/api/debug/devices")
@@ -385,7 +385,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V4.6</title>
+<title>TikTok 集群控制台 Web V4.7</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -956,6 +956,49 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+
+/* V4.7：手机端第二行、第三行字小2号；第三行隐藏“离线超过”；展开/刷新不动 */
+@media (max-width:899px){
+  .header-status-row .stats{
+    font-size:18px !important;
+    font-weight:900 !important;
+    color:#1d9bf0 !important;
+  }
+  .header-status-row .offline-cleaner,
+  .header-status-row .offline-cleaner label{
+    font-size:18px !important;
+    font-weight:900 !important;
+    color:#1d9bf0 !important;
+  }
+  .header-status-row .offline-cleaner input[type="number"]{
+    font-size:18px !important;
+    font-weight:900 !important;
+    width:70px !important;
+  }
+  .offline-over-text{
+    display:none !important;
+  }
+  .header-right-tools{
+    align-items:center !important;
+    gap:8px !important;
+  }
+  .header-right-tools .offline-cleaner{
+    flex:1 1 auto !important;
+    display:flex !important;
+    align-items:center !important;
+    gap:8px !important;
+    flex-wrap:nowrap !important;
+    min-width:0 !important;
+  }
+  .header-right-tools .offline-cleaner label{
+    white-space:nowrap !important;
+  }
+  .header-status-row .refresh-btn,
+  .header-status-row .mobile-header-toggle{
+    font-size:20px !important; /* 展开和刷新保持 V4.6 大小 */
+  }
+}
+
 </style>
 </head>
 <body>
@@ -968,7 +1011,7 @@ body.sync-collapsed{padding-bottom:42px}
     <div class="header-right-tools">
       <div class="offline-cleaner">
         <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
-        <label>离线超过 <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
+        <label><span class="offline-over-text">离线超过</span> <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
       </div>
       <button class="mobile-header-toggle mobile-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
       <button class="refresh-btn" onclick="loadDevices()">刷新</button>
