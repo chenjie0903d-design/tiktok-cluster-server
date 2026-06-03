@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.3：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V3.4：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -310,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.3",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_3"]
+        "version": "v26-web-v3.4",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_4"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.3</title>
+<title>TikTok 集群控制台 Web V3.4</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -471,20 +471,51 @@ h1{font-size:22px;margin:0;font-weight:900}
 .sync-btn.primary{background:#1d9bf0}
 .sync-btn.green{background:#1db954}
 @media (min-width:900px){
-  body{padding-bottom:86px}
+  body{padding-bottom:92px}
+  .footer{display:none}
   .mobile-only{display:none !important}
   .desktop-top-grid,.desktop-action-grid{display:grid;gap:10px;margin-bottom:10px}
   .desktop-top-grid{grid-template-columns:repeat(9,minmax(0,1fr))}
   .desktop-action-grid{grid-template-columns:repeat(8,minmax(0,1fr))}
   .desktop-top-grid .btn,.desktop-action-grid .btn{padding:11px 6px;font-size:14px;min-height:42px;white-space:nowrap}
-  .syncbar{display:grid;grid-template-columns:auto repeat(6,minmax(0,auto));align-items:center;gap:10px;padding:8px 14px}
-  .sync-title{margin:0;white-space:nowrap}
+
+  .syncbar{
+    display:grid;
+    grid-template-columns:max-content repeat(12,minmax(0,1fr));
+    align-items:center;
+    gap:7px;
+    padding:8px 8px;
+    overflow:visible;
+  }
+  .sync-title{margin:0;white-space:nowrap;font-size:12px}
   .sync-row{display:contents}
-  .sync-row label{font-size:12px;white-space:nowrap}
-  .sync-row input[type="number"]{width:64px}
-  .sync-network,.sync-blue,.sync-restartthen,.sync-restartdelay,.sync-save-all,.sync-select-online{display:none !important}
-  .sync-cutip,.sync-ocr,.sync-norestart,.sync-startclicks,.sync-save-selected,.sync-clear{display:flex !important;align-items:center;gap:6px}
-  .sync-save-selected,.sync-clear{display:inline-flex !important;justify-content:center}
+  .sync-row label{
+    font-size:11px;
+    white-space:nowrap;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:3px;
+    min-width:0;
+  }
+  .sync-row input[type="number"]{width:52px;min-width:48px;padding:6px 4px;font-size:11px}
+  .sync-row input[type="checkbox"],.sync-row input[type="radio"]{width:14px;height:14px}
+  .sync-btn{
+    font-size:11px;
+    padding:8px 4px;
+    min-height:34px;
+    width:100%;
+    white-space:nowrap;
+  }
+  .sync-network,.sync-blue,.sync-restartthen,.sync-restartdelay,.sync-save-all,.sync-select-online,
+  .sync-cutip,.sync-ocr,.sync-norestart,.sync-startclicks,.sync-save-selected,.sync-clear{
+    display:flex !important;
+  }
+  .sync-save-selected,.sync-save-all,.sync-select-online,.sync-clear{
+    display:inline-flex !important;
+    align-items:center;
+    justify-content:center;
+  }
 }
 
 .small{font-size:13px;color:#667085}
@@ -494,7 +525,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.3</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.4</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -519,11 +550,11 @@ h1{font-size:22px;margin:0;font-weight:900}
   <div class="desktop-top-grid">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
-    <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
     <button class="btn green" onclick="sendAll('start_monitor')">全部打开监控</button>
     <button class="btn red" onclick="sendAll('stop_monitor')">全部停止监控</button>
-    <button class="btn orange" onclick="sendAll('restart_app_start')">全部重启并启动</button>
     <button class="btn dark" onclick="batchScreenshotAll()">全部批量截图</button>
+    <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
+    <button class="btn orange" onclick="sendAll('restart_app_start')">全部重启并启动</button>
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
     <button class="btn gray" onclick="loadDevices()">刷新状态</button>
   </div>
@@ -564,14 +595,14 @@ h1{font-size:22px;margin:0;font-weight:900}
   <div class="sync-row">
     <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
     <label class="sync-network">网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
-    <label class="sync-blue">蓝色不变 <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
+    <label class="sync-blue">蓝色不变切IP <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
     <label class="sync-ocr">OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
   <div class="sync-row">
     <label class="sync-norestart">时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
     <label class="sync-restartthen"><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
-    <label class="sync-restartdelay">重启迟开 <input id="sync_restart_open_delay" type="number" value="2"></label>
-    <label class="sync-startclicks">点启动 <input id="sync_start_clicks" type="number" value="6"></label>
+    <label class="sync-restartdelay">重启延迟 <input id="sync_restart_open_delay" type="number" value="2"></label>
+    <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="6"></label>
   </div>
   <div class="sync-row">
     <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()">保存并同步选中</button>
