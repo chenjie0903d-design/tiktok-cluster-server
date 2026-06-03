@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.0")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.1")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V4.0：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.1：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -312,8 +312,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v4.0",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_0"]
+        "version": "v26-web-v4.1",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_1"]
     }
 
 @app.get("/api/debug/devices")
@@ -383,7 +383,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V4.0</title>
+<title>TikTok 集群控制台 Web V4.1</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -677,6 +677,7 @@ body.sync-collapsed{padding-bottom:42px}
   accent-color:#1d9bf0;
 }
 .package-section .pkg-url{grid-column:span 2}
+.package-section .pkg-exe{grid-column:span 2}
 .package-section .pkg-sha{grid-column:span 2}
 .pkg-btn{
   border:0;
@@ -696,6 +697,7 @@ body.sync-collapsed{padding-bottom:42px}
     gap:7px;
   }
   .package-section .pkg-url,
+  .package-section .pkg-exe,
   .package-section .pkg-sha,
   .package-section .pkg-title{
     grid-column:span 2;
@@ -720,7 +722,7 @@ body.sync-collapsed{padding-bottom:42px}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V4.0</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V4.1</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <div class="stats" id="stats">加载中...</div>
@@ -809,9 +811,9 @@ body.sync-collapsed{padding-bottom:42px}
 
   <div class="package-section">
     <label class="pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
-    <label class="pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写"></label>
-    <label>文件夹名 <input id="pkg_folder" type="text" placeholder="默认按zip"></label>
-    <label>EXE名 <input id="pkg_exe" type="text" placeholder="主程序.exe"></label>
+    <label class="pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe"></label>
+    <label class="pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写；不要带 sha256: 前缀"></label>
+    <label>文件夹名 <input id="pkg_folder" type="text" placeholder="留空=按zip顶层文件夹"></label>
     <label class="pkg-title">窗口标题 <input id="pkg_title" type="text" placeholder="新版窗口标题，可空"></label>
     <label><input id="pkg_launch" type="checkbox" checked>解压后打开</label>
     <label><input id="pkg_start" type="checkbox">打开后启动</label>
@@ -1181,7 +1183,8 @@ function getPackageConfig(){
 function validatePackageConfig(cfg){
   if(!cfg.package_url) return "请先填写更新包URL";
   if(!/\.zip($|\?)/i.test(cfg.package_url)) return "目前远程更新只支持 .zip，建议把 rar 重新压成 zip";
-  if(!cfg.exe_name) return "请填写主程序 EXE 名，例如：TIKTOK点赞系统-3.19 D版本.exe";
+  if(!cfg.exe_name) return "请填写主程序 EXE 名，必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe";
+  if(!/\.exe$/i.test(cfg.exe_name)) return "EXE名必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe";
   return "";
 }
 async function updatePackageSelected(){
