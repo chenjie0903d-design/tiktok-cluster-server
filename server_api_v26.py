@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.6：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V3.8：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -310,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.6",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_6"]
+        "version": "v26-web-v3.8",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_8"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.6</title>
+<title>TikTok 集群控制台 Web V3.8</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -523,12 +523,23 @@ h1{font-size:22px;margin:0;font-weight:900}
   .wrap{padding:8px}
   .all-grid,.multi-grid{gap:6px}
   .multi{margin-top:6px;padding-top:6px}
-  .all-grid .btn,.multi-grid .btn{
+
+  /* 第一排批量控制按钮：保持紧凑 */
+  .all-grid .btn{
     min-height:24px;
     padding:5px 4px;
     border-radius:9px;
     font-size:13px;
     line-height:1.1;
+  }
+
+  /* 第二排单选控制按钮：比 V3.6 增高 0.5 倍 */
+  .multi-grid .btn{
+    min-height:36px;
+    padding:8px 5px;
+    border-radius:10px;
+    font-size:13px;
+    line-height:1.15;
   }
 }
 
@@ -560,6 +571,29 @@ body.sync-collapsed{padding-bottom:42px}
   body.sync-collapsed{padding-bottom:42px}
 }
 
+/* V3.8：手机端顶部控制区默认隐藏，可展开/隐藏 */
+@media (max-width:899px){
+  .mobile-control-toggle-row{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:6px;
+    margin-bottom:6px;
+  }
+  .mobile-control-toggle-row .btn{
+    min-height:30px;
+    padding:6px 8px;
+    border-radius:9px;
+    font-size:13px;
+    font-weight:900;
+  }
+  .mobile-control-section.collapsed{
+    display:none !important;
+  }
+  #mobileSelectedControls .wide{
+    grid-column:span 2;
+  }
+}
+
 .small{font-size:13px;color:#667085}
 @media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 </style>
@@ -567,14 +601,17 @@ body.sync-collapsed{padding-bottom:42px}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.6</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.8</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <div class="stats" id="stats">加载中...</div>
 </div>
 
 <div class="wrap">
-  <div class="all-grid mobile-only">
+  <div class="mobile-control-toggle-row mobile-only">
+    <button class="btn gray" id="mobileControlsToggle" onclick="toggleMobileControls()">展开控制 ⬇️</button>
+  </div>
+  <div id="mobileAllControls" class="all-grid mobile-only mobile-control-section collapsed">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
     <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
@@ -598,10 +635,7 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
   </div>
 
-  <div class="multi-grid multi mobile-only">
-    <button class="btn gray wide" onclick="selectOnline()">多选在线</button>
-    <button class="btn gray wide" onclick="clearSelected()">取消选择</button>
-
+  <div id="mobileSelectedControls" class="multi-grid multi mobile-only mobile-control-section collapsed">
     <button class="btn blue" onclick="sendSelected('open_target')">打开</button>
     <button class="btn blue" onclick="sendSelected('start_target')">启动</button>
     <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
@@ -611,6 +645,9 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="btn orange" onclick="sendSelected('restart_app_only')">重启</button>
     <button class="btn orange" onclick="sendSelected('restart_app_start')">重启后启动</button>
     <button class="btn dark" onclick="sendSelected('update_github_config')">更新GitHub</button>
+
+    <button class="btn gray wide" onclick="selectOnline()">多选在线</button>
+    <button class="btn gray wide" onclick="clearSelected()">取消选择</button>
   </div>
 
   <div class="desktop-action-grid">
@@ -665,6 +702,26 @@ if (keyFromUrl) localStorage.setItem("ADMIN_KEY", keyFromUrl);
 const ADMIN_KEY = keyFromUrl || localStorage.getItem("ADMIN_KEY") || "";
 let DEVICES = [];
 let selected = new Set();
+
+function setMobileControlsCollapsed(collapsed){
+  const allBox = document.getElementById("mobileAllControls");
+  const selBox = document.getElementById("mobileSelectedControls");
+  const btn = document.getElementById("mobileControlsToggle");
+  if(allBox) allBox.classList.toggle("collapsed", collapsed);
+  if(selBox) selBox.classList.toggle("collapsed", collapsed);
+  if(btn) btn.textContent = collapsed ? "展开控制 ⬇️" : "隐藏控制 ⬆️";
+  localStorage.setItem("MOBILE_CONTROLS_COLLAPSED", collapsed ? "1" : "0");
+}
+function toggleMobileControls(){
+  const allBox = document.getElementById("mobileAllControls");
+  const collapsed = !allBox || allBox.classList.contains("collapsed");
+  setMobileControlsCollapsed(!collapsed);
+}
+document.addEventListener("DOMContentLoaded", ()=>{
+  const saved = localStorage.getItem("MOBILE_CONTROLS_COLLAPSED");
+  setMobileControlsCollapsed(saved === null ? true : saved === "1");
+});
+
 
 function setSyncBarCollapsed(collapsed){
   const bar = document.getElementById("syncbar");
