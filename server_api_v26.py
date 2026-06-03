@@ -889,7 +889,7 @@ body.sync-collapsed{padding-bottom:42px}
 
   <div class="package-section">
     <label class="pkg-field pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
-    <label class="pkg-field pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe"></label>
+    <label class="pkg-field pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK.exe"></label>
     <label class="pkg-field pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写；不要带 sha256: 前缀"></label>
     <label class="pkg-field pkg-folder">文件夹名 <input id="pkg_folder" type="text" placeholder="留空=按zip顶层文件夹"></label>
 
