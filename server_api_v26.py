@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.1：从客户端上传/保存的运行日志中解析最近一次工作时间。
+    Web V3.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -310,8 +310,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.1",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_1"]
+        "version": "v26-web-v3.2",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_2"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +381,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.1</title>
+<title>TikTok 集群控制台 Web V3.2</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -401,6 +401,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 .all-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .multi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .multi-grid .wide{grid-column:span 2}
+.desktop-top-grid,.desktop-action-grid{display:none}
 
 .btn{border:0;border-radius:13px;color:#fff;font-size:15px;font-weight:850;padding:12px 8px;min-height:44px}
 .btn.blue{background:var(--blue)}.btn.green{background:var(--green)}.btn.red{background:var(--red)}.btn.orange{background:var(--orange)}.btn.dark{background:var(--dark)}
@@ -470,12 +471,20 @@ h1{font-size:22px;margin:0;font-weight:900}
 .sync-btn.primary{background:#1d9bf0}
 .sync-btn.green{background:#1db954}
 @media (min-width:900px){
-  body{padding-bottom:170px}
-  .syncbar{padding:8px 14px}
-  .sync-row{grid-template-columns:repeat(8,minmax(0,1fr))}
-
-  body{padding-bottom:170px}
-  .syncbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid #d0d5dd;box-shadow:0 -2px 10px rgba(15,23,42,.12);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+  body{padding-bottom:125px}
+  .mobile-only{display:none !important}
+  .desktop-top-grid,.desktop-action-grid{display:grid;gap:10px;margin-bottom:10px}
+  .desktop-top-grid{grid-template-columns:repeat(9,minmax(0,1fr))}
+  .desktop-action-grid{grid-template-columns:repeat(8,minmax(0,1fr))}
+  .desktop-top-grid .btn,.desktop-action-grid .btn{padding:11px 6px;font-size:14px;min-height:42px;white-space:nowrap}
+  .syncbar{display:grid;grid-template-columns:auto repeat(6,minmax(0,auto));align-items:center;gap:10px;padding:8px 14px}
+  .sync-title{margin:0;white-space:nowrap}
+  .sync-row{display:contents}
+  .sync-row label{font-size:12px;white-space:nowrap}
+  .sync-row input[type="number"]{width:64px}
+  .sync-network,.sync-blue,.sync-restartthen,.sync-restartdelay,.sync-save-all,.sync-select-online{display:none !important}
+  .sync-cutip,.sync-ocr,.sync-norestart,.sync-startclicks,.sync-save-selected,.sync-clear{display:flex !important;align-items:center;gap:6px}
+  .sync-save-selected,.sync-clear{display:inline-flex !important;justify-content:center}
 }
 
 .small{font-size:13px;color:#667085}
@@ -485,7 +494,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.1</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.2</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <input id="serverBox" class="server" readonly>
@@ -493,7 +502,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 </div>
 
 <div class="wrap">
-  <div class="all-grid">
+  <div class="all-grid mobile-only">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
     <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
@@ -507,7 +516,19 @@ h1{font-size:22px;margin:0;font-weight:900}
     <button class="btn gray" onclick="loadDevices()">刷新状态</button>
   </div>
 
-  <div class="multi-grid multi">
+  <div class="desktop-top-grid">
+    <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
+    <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
+    <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
+    <button class="btn green" onclick="sendAll('start_monitor')">全部打开监控</button>
+    <button class="btn red" onclick="sendAll('stop_monitor')">全部停止监控</button>
+    <button class="btn orange" onclick="sendAll('restart_app_start')">全部重启并启动</button>
+    <button class="btn dark" onclick="batchScreenshotAll()">全部批量截图</button>
+    <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
+    <button class="btn gray" onclick="loadDevices()">刷新状态</button>
+  </div>
+
+  <div class="multi-grid multi mobile-only">
     <button class="btn gray wide" onclick="selectOnline()">多选在线</button>
     <button class="btn gray wide" onclick="clearSelected()">取消选择</button>
 
@@ -522,6 +543,17 @@ h1{font-size:22px;margin:0;font-weight:900}
     <button class="btn dark" onclick="sendSelected('update_github_config')">更新GitHub</button>
   </div>
 
+  <div class="desktop-action-grid">
+    <button class="btn blue" onclick="sendSelected('open_target')">打开</button>
+    <button class="btn blue" onclick="sendSelected('start_target')">启动</button>
+    <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
+    <button class="btn red" onclick="sendSelected('stop_monitor')">停监控</button>
+    <button class="btn dark" onclick="screenshotSelected()">截图</button>
+    <button class="btn orange" onclick="sendSelected('restart_app_only')">重启</button>
+    <button class="btn orange" onclick="sendSelected('restart_app_start')">重启后启动</button>
+    <button class="btn dark" onclick="sendSelected('update_github_config')">更新GitHub</button>
+  </div>
+
   <div id="cards" class="cards"></div>
   <div class="footer">Safari 可添加到主屏幕，当作手机 App 使用</div>
 </div>
@@ -530,26 +562,26 @@ h1{font-size:22px;margin:0;font-weight:900}
 <div class="syncbar">
   <div class="sync-title">集群参数同步</div>
   <div class="sync-row">
-    <label>切IP <input id="sync_cut_ip" type="number" value="5"></label>
-    <label>网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
-    <label>蓝色不变 <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
-    <label>OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
+    <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
+    <label class="sync-network">网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
+    <label class="sync-blue">蓝色不变 <input id="sync_blue_no_change_auto_ip" type="number" value="210"></label>
+    <label class="sync-ocr">OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
   <div class="sync-row">
-    <label>时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
-    <label><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
-    <label>重启迟开 <input id="sync_restart_open_delay" type="number" value="2"></label>
-    <label>点启动 <input id="sync_start_clicks" type="number" value="6"></label>
+    <label class="sync-norestart"><input id="sync_no_restart_when_duration_ok" type="checkbox" checked>时长不走重启</label>
+    <label class="sync-restartthen"><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
+    <label class="sync-restartdelay">重启迟开 <input id="sync_restart_open_delay" type="number" value="2"></label>
+    <label class="sync-startclicks">点启动 <input id="sync_start_clicks" type="number" value="6"></label>
   </div>
   <div class="sync-row">
-    <button class="sync-btn primary" onclick="syncConfigSelected()">保存并同步选中</button>
-    <button class="sync-btn green" onclick="syncConfigAll()">保存并同步全部</button>
-    <button class="sync-btn" onclick="selectOnline()">多选在线</button>
-    <button class="sync-btn" onclick="clearSelected()">取消选择</button>
+    <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()">保存并同步选中</button>
+    <button class="sync-btn green sync-save-all" onclick="syncConfigAll()">保存并同步全部</button>
+    <button class="sync-btn sync-select-online" onclick="selectOnline()">多选在线</button>
+    <button class="sync-btn sync-clear" onclick="clearSelected()">取消选择</button>
   </div>
 </div>
 
-<div id="imgModal"<div id="imgModal" class="modal" onclick="closeModal()">
+<div id="imgModal" class="modal" onclick="closeModal()">
   <button class="close" onclick="closeModal()">×</button>
   <img id="modalImg">
 </div>
@@ -753,10 +785,8 @@ async function renameOne(code){
   }catch(e){ alert("改名失败：" + e.message); }
 }
 function showShot(code){
-  const d = DEVICES.find(x=>x.machine_code===code) || {};
-  const t = d.screenshot_time || 0;
   const img = document.getElementById("modalImg");
-  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${t}`;
+  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}`;
   document.getElementById("imgModal").classList.add("show");
 }
 function closeModal(){
@@ -765,33 +795,15 @@ function closeModal(){
 
 function getSyncConfig(){
   const networkEl = document.querySelector('input[name="sync_network"]:checked');
-  const switchIp = Number(document.getElementById("sync_cut_ip").value || 5);
-  const networkMode = networkEl ? networkEl.value : "5G";
-  const blueIp = Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210);
-  const ocr = Number(document.getElementById("sync_ocr_interval").value || 30);
-  const noResp = Number(document.getElementById("sync_check_no_response").value || 150);
-  const restartAfter = document.getElementById("sync_restart_then_start").checked;
-  const restartDelay = Number(document.getElementById("sync_restart_open_delay").value || 2);
-  const startDelay = Number(document.getElementById("sync_start_clicks").value || 6);
   return {
-    // V3.1 正确字段，客户端 V29.4 优先读取这些
-    switch_ip: switchIp,
-    network_mode: networkMode,
-    auto_switch_ip_keep_blue: blueIp,
-    ocr_interval: ocr,
-    check_interval_no_response: noResp,
-    restart_after_launch: restartAfter,
-    restart_launch_delay: restartDelay,
-    start_click_delay: startDelay,
-
-    // 兼容 V2.5-V3.0 旧字段
-    cut_ip: switchIp,
-    network: networkMode,
-    blue_no_change_auto_ip: blueIp,
-    no_restart_when_duration_ok: noResp,
-    restart_then_start: restartAfter,
-    restart_open_delay: restartDelay,
-    start_clicks: startDelay
+    cut_ip: Number(document.getElementById("sync_cut_ip").value || 5),
+    network: networkEl ? networkEl.value : "5G",
+    blue_no_change_auto_ip: Number(document.getElementById("sync_blue_no_change_auto_ip").value || 210),
+    ocr_interval: Number(document.getElementById("sync_ocr_interval").value || 30),
+    no_restart_when_duration_ok: document.getElementById("sync_no_restart_when_duration_ok").checked,
+    restart_then_start: document.getElementById("sync_restart_then_start").checked,
+    restart_open_delay: Number(document.getElementById("sync_restart_open_delay").value || 2),
+    start_clicks: Number(document.getElementById("sync_start_clicks").value || 6)
   };
 }
 async function syncConfigOne(code, cfg){
