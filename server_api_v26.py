@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.4")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.6")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V4.4：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.6：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -314,8 +314,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v4.4",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_4"]
+        "version": "v26-web-v4.6",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_6"]
     }
 
 @app.get("/api/debug/devices")
@@ -385,7 +385,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V4.4</title>
+<title>TikTok 集群控制台 Web V4.6</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -800,7 +800,7 @@ body.sync-collapsed{padding-bottom:42px}
 .small{font-size:13px;color:#667085}
 @media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 
-.seq-del{
+.seq-del{display:none !important;
   position:absolute;
   right:17px;
   top:50px;
@@ -836,19 +836,143 @@ body.sync-collapsed{padding-bottom:42px}
   .offline-cleaner input[type="number"]{width:58px;font-size:13px}
 }
 
+
+/* V4.5：顶部标题居中，状态/离线开关/刷新同一行 */
+.title-row{
+  position:relative;
+  justify-content:center;
+  text-align:center;
+}
+.title-row h1{
+  width:100%;
+  text-align:center;
+}
+.header-status-row{
+  margin-top:8px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.header-right-tools{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  min-width:0;
+}
+.stats{
+  color:#1d9bf0 !important;
+  font-size:18px !important;
+  font-weight:900 !important;
+  white-space:nowrap;
+}
+.offline-cleaner{
+  margin-top:0 !important;
+  color:#1d9bf0 !important;
+  font-size:17px !important;
+  font-weight:900 !important;
+}
+.offline-cleaner label{
+  color:#1d9bf0 !important;
+}
+@media (max-width:899px){
+  .title-row{justify-content:center}
+  .title-row h1{text-align:center}
+  .header-status-row{
+    display:block;
+    margin-top:8px;
+  }
+  .stats{
+    color:#1d9bf0 !important;
+    font-size:16px !important; /* 手机端字号不变，只改蓝色 */
+    font-weight:800 !important;
+    white-space:normal;
+  }
+  .header-right-tools{
+    margin-top:8px;
+    display:flex;
+    justify-content:space-between;
+    gap:8px;
+  }
+  .offline-cleaner{
+    color:#1d9bf0 !important;
+    font-size:15px !important;
+    font-weight:900 !important;
+    flex:1 1 auto;
+  }
+  .offline-cleaner label{color:#1d9bf0 !important}
+}
+/* V4.5：电脑端上面两排按钮字号加大2号，不增加按钮高度 */
+@media (min-width:900px){
+  .desktop-top-grid .btn,
+  .desktop-action-grid .btn{
+    font-size:16px !important;
+    min-height:42px !important;
+    padding-top:11px !important;
+    padding-bottom:11px !important;
+    line-height:1.05;
+  }
+}
+
+
+/* V4.6：第二行字体统一，比标题小2号 */
+.title-row h1{
+  font-size:22px !important;
+}
+.header-status-row .stats,
+.header-status-row .offline-cleaner,
+.header-status-row .offline-cleaner label,
+.header-status-row .refresh-btn,
+.header-status-row .mobile-header-toggle{
+  font-size:20px !important;
+  font-weight:900 !important;
+  color:#1d9bf0 !important;
+}
+.header-status-row .refresh-btn,
+.header-status-row .mobile-header-toggle{
+  line-height:1 !important;
+}
+.header-status-row .offline-cleaner input[type="number"]{
+  font-size:20px !important;
+  font-weight:900 !important;
+}
+@media (max-width:899px){
+  .title-row h1{
+    font-size:22px !important;
+  }
+  .header-status-row .stats,
+  .header-status-row .offline-cleaner,
+  .header-status-row .offline-cleaner label,
+  .header-status-row .refresh-btn,
+  .header-status-row .mobile-header-toggle{
+    font-size:20px !important;
+    font-weight:900 !important;
+    color:#1d9bf0 !important;
+  }
+  .header-status-row .offline-cleaner input[type="number"]{
+    font-size:20px !important;
+  }
+}
+
 </style>
 </head>
 <body>
 <div class="header">
   <div class="title-row">
     <h1>TikTok 集群控制台</h1>
-    <button class="mobile-header-toggle mobile-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
-    <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
-  <div class="stats" id="stats">加载中...</div>
-  <div class="offline-cleaner">
-    <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
-    <label>离线超过 <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
+  <div class="header-status-row">
+    <div class="stats" id="stats">加载中...</div>
+    <div class="header-right-tools">
+      <div class="offline-cleaner">
+        <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
+        <label>离线超过 <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
+      </div>
+      <button class="mobile-header-toggle mobile-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
+      <button class="refresh-btn" onclick="loadDevices()">刷新</button>
+    </div>
   </div>
 </div>
 
@@ -1159,7 +1283,6 @@ function render(){
     const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
     card.innerHTML = `
       <div class="seq">${seq}</div>
-      <button class="seq-del" title="删除此设备" onclick="deleteDeviceConfirm(event, '${code}')">X</button>
       <div class="dev-head">
         <input class="select-box" type="checkbox" ${checked} onchange="toggleSelect('${code}', this.checked)">
         <div class="name" title="${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}">${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}</div>
