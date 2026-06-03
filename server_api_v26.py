@@ -1264,8 +1264,8 @@ function getPackageConfig(){
 function validatePackageConfig(cfg){
   if(!cfg.package_url) return "请先填写更新包URL";
   if(!/\.zip($|\?)/i.test(cfg.package_url)) return "目前远程更新只支持 .zip，建议把 rar 重新压成 zip";
-  if(!cfg.exe_name) return "请填写主程序 EXE 名，必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe";
-  if(!/\.exe$/i.test(cfg.exe_name)) return "EXE名必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe";
+  if(!cfg.exe_name) return "请填写主程序 EXE 名，必须带 .exe 后缀，例如：TIKTOK.exe";
+  if(!/\.exe$/i.test(cfg.exe_name)) return "EXE名必须带 .exe 后缀，例如：TIKTOK.exe";
   return "";
 }
 async function updatePackageSelected(){
