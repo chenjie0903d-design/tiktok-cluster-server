@@ -8,7 +8,7 @@ import base64
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V3.0")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.0")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -52,7 +52,7 @@ class LogIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V3.10：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V4.0：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -167,6 +167,8 @@ def list_devices():
         elif item.get("status") == "screenshotting":
             # V36：如果已经收到截图，就不要一直显示截图中
             item["display_state"] = "online" if screenshots.get(item.get("machine_code")) else "screenshotting"
+        elif item.get("status") == "updating_package":
+            item["display_state"] = "updating_package"
         elif item.get("status") in ("starting_app", "restarting_app"):
             item["display_state"] = "online"
         else:
@@ -310,8 +312,8 @@ def delete_device(machine_code: str):
 def version():
     return {
         "ok": True,
-        "version": "v26-web-v3.10",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v3_10"]
+        "version": "v26-web-v4.0",
+        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_0"]
     }
 
 @app.get("/api/debug/devices")
@@ -381,7 +383,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V3.10</title>
+<title>TikTok 集群控制台 Web V4.0</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -641,6 +643,76 @@ body.sync-collapsed{padding-bottom:42px}
   .device-restart-start .two-line{line-height:1.05}
 }
 
+/* V4.0：远程软件更新包 */
+.package-section{
+  grid-column:1 / -1;
+  border-top:1px solid #e5e7eb;
+  margin-top:8px;
+  padding-top:8px;
+  display:grid;
+  grid-template-columns:2fr 1.6fr 1fr 1fr 1.2fr auto auto;
+  gap:7px;
+  align-items:center;
+}
+.package-section label{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  font-size:13px;
+  font-weight:800;
+  white-space:nowrap;
+  color:#111827;
+}
+.package-section input[type="text"]{
+  width:100%;
+  min-width:0;
+  border:1px solid #d0d5dd;
+  border-radius:8px;
+  padding:7px 6px;
+  font-size:13px;
+}
+.package-section input[type="checkbox"]{
+  width:15px;
+  height:15px;
+  accent-color:#1d9bf0;
+}
+.package-section .pkg-url{grid-column:span 2}
+.package-section .pkg-sha{grid-column:span 2}
+.pkg-btn{
+  border:0;
+  border-radius:9px;
+  padding:9px 6px;
+  font-size:13px;
+  font-weight:900;
+  color:#fff;
+  background:#465465;
+  white-space:nowrap;
+}
+.pkg-btn.primary{background:#1d9bf0}
+.pkg-btn.green{background:#1db954}
+@media (max-width:899px){
+  .package-section{
+    grid-template-columns:1fr 1fr;
+    gap:7px;
+  }
+  .package-section .pkg-url,
+  .package-section .pkg-sha,
+  .package-section .pkg-title{
+    grid-column:span 2;
+  }
+  .package-section label{
+    font-size:13px;
+  }
+  .package-section input[type="text"]{
+    font-size:13px;
+    padding:8px 6px;
+  }
+  .pkg-btn{
+    font-size:13px;
+    min-height:36px;
+  }
+}
+
 .small{font-size:13px;color:#667085}
 @media (min-width:900px){.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{margin:0}.actions{grid-template-columns:repeat(2,1fr)}.action-side-shot{max-width:104px}.action-side-shot .thumb{width:100px;max-height:72px}}
 </style>
@@ -648,7 +720,7 @@ body.sync-collapsed{padding-bottom:42px}
 <body>
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1><span class="ver">Web V3.10</span>
+    <h1>TikTok 集群控制台</h1><span class="ver">Web V4.0</span>
     <button class="refresh-btn" onclick="loadDevices()">刷新</button>
   </div>
   <div class="stats" id="stats">加载中...</div>
@@ -733,6 +805,18 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="sync-btn green sync-save-all" onclick="syncConfigAll()">保存并同步全部</button>
     <button class="sync-btn sync-select-online" onclick="selectOnline()">多选在线</button>
     <button class="sync-btn sync-clear" onclick="clearSelected()">取消选择</button>
+  </div>
+
+  <div class="package-section">
+    <label class="pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
+    <label class="pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写"></label>
+    <label>文件夹名 <input id="pkg_folder" type="text" placeholder="默认按zip"></label>
+    <label>EXE名 <input id="pkg_exe" type="text" placeholder="主程序.exe"></label>
+    <label class="pkg-title">窗口标题 <input id="pkg_title" type="text" placeholder="新版窗口标题，可空"></label>
+    <label><input id="pkg_launch" type="checkbox" checked>解压后打开</label>
+    <label><input id="pkg_start" type="checkbox">打开后启动</label>
+    <button class="pkg-btn primary" onclick="updatePackageSelected()">更新选中</button>
+    <button class="pkg-btn green" onclick="updatePackageAll()">更新全部在线</button>
   </div>
 </div>
 
@@ -855,7 +939,7 @@ function stateClass(d){
   if(isBadCarrier(d)) return "bad";
   if(!d.online) return "offline";
   if(d.running) return "running";
-  if(["screenshotting","switching_ip"].includes(d.display_state||d.status)) return "busy";
+  if(["screenshotting","switching_ip","updating_package"].includes(d.display_state||d.status)) return "busy";
   return "";
 }
 
@@ -883,6 +967,7 @@ function stateText(d){
   const s = d.display_state || d.status || "online";
   if(s==="switching_ip") return "切IP中";
   if(s==="screenshotting") return d.has_screenshot ? "在线" : "截图中";
+  if(s==="updating_package") return "更新中";
   return "在线";
 }
 function render(){
@@ -1079,6 +1164,59 @@ async function syncConfigAll(){
     setTimeout(loadDevices,1000);
   }catch(e){ await centerAlert("同步失败：" + e.message); }
 }
+
+
+function getPackageConfig(){
+  return {
+    package_url: document.getElementById("pkg_url").value.trim(),
+    sha256: document.getElementById("pkg_sha256").value.trim(),
+    folder_name: document.getElementById("pkg_folder").value.trim(),
+    exe_name: document.getElementById("pkg_exe").value.trim(),
+    window_title: document.getElementById("pkg_title").value.trim(),
+    extract_base: "desktop",
+    auto_launch: document.getElementById("pkg_launch").checked,
+    auto_click_start: document.getElementById("pkg_start").checked
+  };
+}
+function validatePackageConfig(cfg){
+  if(!cfg.package_url) return "请先填写更新包URL";
+  if(!/\.zip($|\?)/i.test(cfg.package_url)) return "目前远程更新只支持 .zip，建议把 rar 重新压成 zip";
+  if(!cfg.exe_name) return "请填写主程序 EXE 名，例如：TIKTOK点赞系统-3.19 D版本.exe";
+  return "";
+}
+async function updatePackageSelected(){
+  const list = [...selected];
+  if(list.length===0){ await centerAlert("请先勾选设备"); return; }
+  const cfg = getPackageConfig();
+  const err = validatePackageConfig(cfg);
+  if(err){ await centerAlert(err); return; }
+  if(!await centerConfirm(`确定给选中的 ${list.length} 台设备远程更新软件包？\n\n默认解压到客户端桌面。`)) return;
+  try{
+    for(const code of list){
+      await api(`/api/devices/${encodeURIComponent(code)}/command`,{
+        method:"POST",
+        body:JSON.stringify({command:"update_package", value:JSON.stringify(cfg)})
+      });
+    }
+    await centerAlert("已下发远程更新包命令");
+    setTimeout(loadDevices, 1000);
+  }catch(e){ await centerAlert("下发失败：" + e.message); }
+}
+async function updatePackageAll(){
+  const cfg = getPackageConfig();
+  const err = validatePackageConfig(cfg);
+  if(err){ await centerAlert(err); return; }
+  if(!await centerConfirm("确定给全部在线设备远程更新软件包？\n\n默认解压到客户端桌面。")) return;
+  try{
+    const data = await api("/api/commands/all",{
+      method:"POST",
+      body:JSON.stringify({command:"update_package", value:JSON.stringify(cfg)})
+    });
+    await centerAlert(`已下发远程更新包命令，数量：${data.count||0}`);
+    setTimeout(loadDevices, 1000);
+  }catch(e){ await centerAlert("下发失败：" + e.message); }
+}
+
 
 loadDevices();
 setInterval(loadDevices,5000);
