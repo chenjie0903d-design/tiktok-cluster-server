@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.7")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.8")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -334,7 +334,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V5.7：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V5.8：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -399,7 +399,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.7-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.8-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -603,7 +603,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v5.7-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_7", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button"]}
+    return {"ok": True, "version": "v26-web-v5.8-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_8", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -895,7 +895,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V5.7</title>
+<title>TikTok 集群控制台 Web V5.8</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -1653,6 +1653,104 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+
+/* V5.8：电脑端顶部右侧一行显示；手机端用户管理输入框压缩 */
+@media (min-width:900px){
+  .header-status-row{
+    display:flex!important;
+    align-items:center!important;
+    justify-content:space-between!important;
+    gap:10px!important;
+  }
+  .header-right-tools{
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    align-items:center!important;
+    justify-content:flex-end!important;
+    gap:8px!important;
+    white-space:nowrap!important;
+  }
+  .header-right-tools .offline-cleaner{
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    align-items:center!important;
+    gap:8px!important;
+    white-space:nowrap!important;
+    flex:0 0 auto!important;
+  }
+  .header-right-tools .offline-cleaner label{
+    white-space:nowrap!important;
+    flex-wrap:nowrap!important;
+  }
+  .header-status-row .refresh-btn,
+  .header-status-row .bind-btn,
+  .header-status-row .user-btn,
+  .header-status-row .mobile-header-toggle{
+    white-space:nowrap!important;
+    word-break:keep-all!important;
+    line-height:1!important;
+    min-width:76px!important;
+    height:44px!important;
+    padding:8px 12px!important;
+    display:inline-flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+  }
+  .header-status-row .bind-btn,
+  .header-status-row .user-btn{
+    min-width:86px!important;
+  }
+  .header-status-row .refresh-btn{
+    min-width:64px!important;
+  }
+}
+@media (max-width:899px){
+  .stats-line-wrap{
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    align-items:center!important;
+    gap:4px!important;
+  }
+  .stats-line-wrap .stats{
+    flex:1 1 auto!important;
+    min-width:0!important;
+    white-space:nowrap!important;
+    overflow:hidden!important;
+    text-overflow:clip!important;
+    font-size:16px!important;
+  }
+  .mobile-user-btn{
+    min-width:42px!important;
+    height:30px!important;
+    font-size:16px!important;
+    padding:5px 7px!important;
+  }
+  .user-create{
+    grid-template-columns:minmax(0,2fr) 46px 62px 58px!important;
+    gap:6px!important;
+    align-items:stretch!important;
+  }
+  .user-create input{
+    min-width:0!important;
+    padding:9px 6px!important;
+    font-size:14px!important;
+  }
+  #newUsername{width:100%!important}
+  #newMax{width:46px!important}
+  #newDays{width:62px!important}
+  .user-create button{
+    grid-column:auto!important;
+    width:58px!important;
+    padding:6px 4px!important;
+    font-size:14px!important;
+    line-height:1.05!important;
+    white-space:normal!important;
+  }
+  .user-create button::first-line{
+    line-height:1.05!important;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -1811,8 +1909,8 @@ body.sync-collapsed{padding-bottom:42px}
     <div class="user-create">
       <input id="newUsername" placeholder="用户名">
       <input id="newMax" type="number" value="3" placeholder="设备数">
-      <input id="newDays" placeholder="到期天数，如365">
-      <button onclick="createUser()">创建用户</button>
+      <input id="newDays" placeholder="到期天数">
+      <button onclick="createUser()">创建<br>用户</button>
     </div>
     <div id="userList" class="user-panel"></div>
     <div class="bound-actions"><button class="bound-cancel" onclick="closeUserModal()">关闭</button><button class="bound-save" onclick="loadUsers()">刷新</button></div>
@@ -2014,7 +2112,7 @@ function isMobileView(){
 function buildStatsText(deviceText, online, running){
   const t = new Date().toLocaleTimeString();
   if(isMobileView()){
-    return `设备 ${deviceText}，在线 ${online}，监控 ${running}，刷新时间 ${t}`;
+    return `设备 ${deviceText}, 在线 ${online}, 监控 ${running}, 刷新时间 ${t}`;
   }
   return `设备：${deviceText}，在线：${online}，监控：${running}，刷新时间：${t}`;
 }
@@ -2569,8 +2667,8 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
         <div class='tip'>管理员用 ADMIN_KEY；普通用户用 API 密钥。没有正确密码不会加载控制台。</div>
         </div>
         <script>
-        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=57'}
-        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=57'}
+        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=58'}
+        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=58'}
         </script></body></html>
         """, status_code=401)
 
