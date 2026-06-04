@@ -616,9 +616,7 @@ def list_devices(request: Request, key: Optional[str] = None, api_key: Optional[
 @app.post("/api/devices/{machine_code}/command")
 def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     machine_code = normalize_machine_code(machine_code)
-    ctx = verify_device_access(request, machine_code, key, api_key)
-    if not ctx["is_admin"] and str(cmd.command).strip() in ("update_package", "update_config", "update_github_config"):
-        raise HTTPException(status_code=403, detail="admin only")
+    verify_device_access(request, machine_code, key, api_key)
     if machine_code not in devices:
         # 允许给已绑定但当前离线的设备排队？为了避免无效堆积，保持旧逻辑：必须已心跳出现。
         raise HTTPException(status_code=404, detail="device not found")
@@ -633,8 +631,6 @@ def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optio
 @app.post("/api/commands/all")
 def send_all(cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     ctx = get_auth_context(request, key, api_key)
-    if not ctx["is_admin"]:
-        raise HTTPException(status_code=403, detail="admin only")
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
@@ -717,9 +713,7 @@ def debug_devices(request: Request, key: Optional[str] = None):
 @app.post("/api/devices/{machine_code}/config")
 def set_device_config(machine_code: str, data: ConfigIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     machine_code = normalize_machine_code(machine_code)
-    ctx = verify_device_access(request, machine_code, key, api_key)
-    if not ctx["is_admin"]:
-        raise HTTPException(status_code=403, detail="admin only")
+    verify_device_access(request, machine_code, key, api_key)
     if machine_code not in devices:
         raise HTTPException(status_code=404, detail="device not found")
     configs[machine_code] = {"config": data.config, "updated_at": time.time()}
@@ -730,8 +724,6 @@ def set_device_config(machine_code: str, data: ConfigIn, request: Request, key: 
 @app.post("/api/config/all")
 def set_all_config(data: ConfigIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     ctx = get_auth_context(request, key, api_key)
-    if not ctx["is_admin"]:
-        raise HTTPException(status_code=403, detail="admin only")
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
@@ -2046,22 +2038,41 @@ body.sync-collapsed{padding-bottom:42px}
     line-height:1.25!important;
   }
   .syncbar .sync-top-tools{
-    grid-template-columns:1fr 1fr!important;
+    grid-template-columns:minmax(0,1.55fr) minmax(0,.9fr) minmax(0,.9fr)!important;
     gap:8px!important;
   }
+  body:not(.is-admin-mode) .syncbar .sync-top-tools{
+    grid-template-columns:minmax(0,1.65fr) minmax(0,1fr)!important;
+  }
   .syncbar .sync-top-tools .offline-cleaner{
-    grid-column:1 / -1!important;
-    display:grid!important;
-    grid-template-columns:auto auto!important;
-    gap:8px!important;
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    gap:4px!important;
     align-items:center!important;
-    font-size:15px!important;
+    min-width:0!important;
+  }
+  .syncbar .sync-top-tools .offline-cleaner label{
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    gap:3px!important;
+    width:100%!important;
+    min-width:0!important;
+    white-space:nowrap!important;
+    font-size:13px!important;
+    font-weight:850!important;
+  }
+  .syncbar .sync-top-tools .offline-cleaner input[type="number"]{
+    width:39px!important;
+    min-width:36px!important;
+    padding:6px 3px!important;
+    font-size:13px!important;
   }
   .syncbar .sync-top-tools .bind-btn,
   .syncbar .sync-top-tools .user-btn{
     width:100%!important;
     min-height:42px!important;
-    font-size:16px!important;
+    font-size:15px!important;
   }
   .syncbar .sync-row:not(.sync-top-tools){
     grid-template-columns:repeat(4,minmax(0,1fr))!important;
@@ -2070,29 +2081,58 @@ body.sync-collapsed{padding-bottom:42px}
 }
 @media (min-width:900px){
   .syncbar{
-    padding:18px 18px calc(18px + env(safe-area-inset-bottom))!important;
+    padding:22px 30px calc(24px + env(safe-area-inset-bottom))!important;
   }
   .syncbar .sync-title{
+    width:min(100%,1880px)!important;
+    min-height:28px!important;
+    display:flex!important;
+    align-items:center!important;
+    margin:0 auto 14px!important;
+    padding-bottom:10px!important;
+    border-bottom:1px solid #eef2f7!important;
     font-size:18px!important;
-    margin-bottom:12px!important;
+  }
+  .syncbar .user-expire-title{
+    margin-left:0!important;
+    font-size:18px!important;
   }
   .syncbar .sync-top-tools{
-    grid-template-columns:minmax(320px,1.5fr) 170px 170px!important;
+    width:min(100%,1880px)!important;
+    grid-template-columns:minmax(320px,380px) 190px 190px!important;
     gap:12px!important;
-    max-width:920px!important;
-    margin-bottom:12px!important;
+    justify-content:start!important;
+    margin:0 auto 14px!important;
+  }
+  body:not(.is-admin-mode) .syncbar .sync-top-tools{
+    grid-template-columns:minmax(320px,380px) 190px!important;
+    max-width:min(100%,1880px)!important;
   }
   .syncbar .sync-top-tools .offline-cleaner{
     display:flex!important;
     flex-wrap:nowrap!important;
-    gap:14px!important;
+    align-items:center!important;
+    gap:8px!important;
     min-width:0!important;
     font-size:17px!important;
   }
+  .syncbar .sync-top-tools .offline-cleaner label{
+    width:100%!important;
+    justify-content:flex-start!important;
+    gap:7px!important;
+    white-space:nowrap!important;
+  }
+  .syncbar .sync-top-tools .offline-cleaner input[type="number"]{
+    width:72px!important;
+    min-width:68px!important;
+    padding:9px 8px!important;
+    font-size:17px!important;
+  }
   .syncbar .sync-row:not(.sync-top-tools){
-    grid-template-columns:repeat(4,minmax(170px,1fr))!important;
+    width:min(100%,1880px)!important;
+    grid-template-columns:repeat(4,minmax(210px,1fr))!important;
     gap:12px!important;
-    margin-top:10px!important;
+    margin:10px auto 0!important;
   }
   .syncbar .sync-row label{
     font-size:16px!important;
@@ -2109,9 +2149,10 @@ body.sync-collapsed{padding-bottom:42px}
     padding:10px 10px!important;
   }
   .package-section{
-    grid-template-columns:repeat(4,minmax(180px,1fr))!important;
+    width:min(100%,1880px)!important;
+    grid-template-columns:repeat(4,minmax(240px,1fr))!important;
     gap:12px!important;
-    margin-top:14px!important;
+    margin:16px auto 0!important;
     padding-top:14px!important;
   }
   .package-section .pkg-field{
@@ -2163,7 +2204,7 @@ body.sync-collapsed{padding-bottom:42px}
 </div>
 
 <div class="wrap">
-  <div id="mobileAllControls" class="all-grid mobile-only mobile-control-section collapsed admin-only">
+  <div id="mobileAllControls" class="all-grid mobile-only mobile-control-section collapsed">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
     <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
@@ -2187,7 +2228,7 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
   </div>
 
-  <div id="mobileSelectedControls" class="multi-grid multi mobile-only mobile-control-section collapsed admin-only">
+  <div id="mobileSelectedControls" class="multi-grid multi mobile-only mobile-control-section collapsed">
     <button class="btn blue" onclick="sendSelected('open_target')">打开</button>
     <button class="btn blue" onclick="sendSelected('start_target')">启动</button>
     <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
@@ -2223,32 +2264,31 @@ body.sync-collapsed{padding-bottom:42px}
   <div class="sync-title"><span id="userExpireTitle" class="user-expire-title"></span></div>
   <div class="sync-row sync-top-tools">
     <div class="offline-cleaner">
-      <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
-      <label><span class="offline-over-text">离线超过</span> <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
+      <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线 <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
     </div>
-    <button class="sync-btn bind-btn" onclick="openBoundModal()">绑定设备</button>
     <button class="sync-btn user-btn admin-only" id="userManageBtn" onclick="openUserModal()">用户管理</button>
+    <button class="sync-btn bind-btn" onclick="openBoundModal()">绑定设备</button>
   </div>
-  <div class="sync-row admin-only">
+  <div class="sync-row">
     <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
     <label class="sync-network">网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
     <label class="sync-blue">蓝色不变切IP <input id="sync_blue_no_change_auto_ip" type="number" value="310"></label>
     <label class="sync-ocr">OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
-  <div class="sync-row admin-only">
+  <div class="sync-row">
     <label class="sync-norestart">时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
     <label class="sync-restartthen"><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
     <label class="sync-restartdelay">重启延迟 <input id="sync_restart_open_delay" type="number" value="3"></label>
     <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="5"></label>
   </div>
-  <div class="sync-row admin-only">
+  <div class="sync-row">
     <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()"><span class="two-line">保存并<br>同步选中</span></button>
     <button class="sync-btn green sync-save-all" onclick="syncConfigAll()"><span class="two-line">保存并<br>同步全部</span></button>
     <button class="sync-btn sync-select-online" onclick="selectOnline()">多选在线</button>
     <button class="sync-btn sync-clear" onclick="clearSelected()">取消选择</button>
   </div>
 
-  <div class="package-section admin-only">
+  <div class="package-section">
     <label class="pkg-field pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
     <label class="pkg-field pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe"></label>
     <label class="pkg-field pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写；不要带 sha256: 前缀"></label>
@@ -2548,14 +2588,13 @@ function render(){
     const card = document.createElement("div");
     card.className = "card " + stateClass(d);
     const checked = selected.has(code) ? "checked" : "";
-    const selectBox = IS_ADMIN ? `<input class="select-box" type="checkbox" ${checked} onchange="toggleSelect('${code}', this.checked)">` : "";
     const loc = d.location_carrier || `${d.location||""}${d.carrier||""}` || "-";
     const bad = isBadCarrier(d);
     const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?${ADMIN_KEY ? 'key='+encodeURIComponent(ADMIN_KEY) : 'api_key='+encodeURIComponent(USER_API_KEY)}&t=${d.screenshot_time||0}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
     card.innerHTML = `
       <div class="seq">${seq}</div>
       <div class="dev-head">
-        ${selectBox}
+        <input class="select-box" type="checkbox" ${checked} onchange="toggleSelect('${code}', this.checked)">
         <div class="name" title="${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}">${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}</div>
         <div class="ago-top">${agoText(d)}</div>
       </div>
@@ -3086,7 +3125,7 @@ async function loadUserExpireTitle(){
     const user = me.user || {};
     const exp = user.user_expires_at || user.expires_at || "";
     const remain = expireRemainText(exp);
-    el.textContent = `用户：${user.username || ""}　到期：${formatExpireDateText(exp)}${remain ? "　" + remain : ""}`;
+    el.textContent = `用户：${user.username || ""}　到期时间：${formatExpireDateText(exp)}${remain ? "　" + remain : ""}`;
     el.className = "user-expire-title";
     if(remain.includes("已过期")) el.classList.add("expired");
     else{
