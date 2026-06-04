@@ -70,6 +70,28 @@ def make_api_key() -> str:
     return "tk_live_" + secrets.token_urlsafe(32).replace("-", "").replace("_", "")[:40]
 
 
+def make_password_hash(password: str) -> str:
+    password = str(password or "")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="password must be at least 6 characters")
+    salt = secrets.token_urlsafe(18)
+    iterations = 120000
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    return f"pbkdf2_sha256${iterations}${salt}${base64.b64encode(digest).decode('ascii')}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        algo, iterations, salt, digest_b64 = str(stored_hash or "").split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac("sha256", str(password or "").encode("utf-8"), salt.encode("utf-8"), int(iterations))
+        expected = base64.b64decode(digest_b64.encode("ascii"))
+        return hmac.compare_digest(digest, expected)
+    except Exception:
+        return False
+
+
 def normalize_machine_code(machine_code: str) -> str:
     code = str(machine_code or "").strip()
     code = re.sub(r"[^A-Za-z0-9_\-]", "", code)
@@ -124,6 +146,7 @@ def init_db():
             ''')
             cur.execute("CREATE INDEX IF NOT EXISTS idx_bound_devices_user_id ON bound_devices(user_id);")
             cur.execute("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_plain TEXT;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);")
             conn.commit()
     print("[multi-user] PostgreSQL tables ready")
@@ -193,6 +216,40 @@ def check_user_active(row):
         if expired and expired.get("expired"):
             raise HTTPException(status_code=403, detail="user expired")
     return row
+
+
+def check_plain_user_active(row):
+    if not row:
+        raise HTTPException(status_code=401, detail="user invalid")
+    if row.get("status") != "active":
+        raise HTTPException(status_code=403, detail="user disabled")
+    if row.get("expires_at"):
+        expired = db_query("SELECT NOW() > %s AS expired", [row.get("expires_at")], one=True)
+        if expired and expired.get("expired"):
+            raise HTTPException(status_code=403, detail="user expired")
+    return row
+
+
+def get_or_create_login_api_key(user_id: int) -> str:
+    row = db_query("""
+        SELECT key_plain
+        FROM api_keys
+        WHERE user_id=%s
+          AND status='active'
+          AND key_plain IS NOT NULL
+          AND (expires_at IS NULL OR expires_at > NOW())
+        ORDER BY id DESC
+        LIMIT 1
+    """, [user_id], one=True)
+    if row and row.get("key_plain"):
+        db_query("UPDATE api_keys SET last_used_at=NOW() WHERE key_plain=%s", [row["key_plain"]], commit=True)
+        return row["key_plain"]
+    raw = make_api_key()
+    db_query("""
+        INSERT INTO api_keys(user_id,key_hash,key_prefix,key_plain,last_used_at)
+        VALUES(%s,%s,%s,%s,NOW())
+    """, [user_id, api_key_hash(raw), raw[:16], raw], commit=True)
+    return raw
 
 
 def get_auth_context(request: Request, key: Optional[str] = None, api_key: Optional[str] = None, allow_legacy=True):
@@ -347,6 +404,7 @@ class UserCreateIn(BaseModel):
     max_devices: int = 3
     expires_at: Optional[str] = None
     expires_days: Optional[int] = None
+    password: Optional[str] = None
 
 class UserUpdateIn(BaseModel):
     username: Optional[str] = None
@@ -354,6 +412,17 @@ class UserUpdateIn(BaseModel):
     expires_at: Optional[str] = None
     max_devices: Optional[int] = None
     bind_mode: Optional[str] = None
+
+class PasswordLoginIn(BaseModel):
+    username: str
+    password: str
+
+class PasswordChangeIn(BaseModel):
+    old_password: Optional[str] = None
+    new_password: str
+
+class PasswordResetIn(BaseModel):
+    password: str
 
 class BoundDeviceIn(BaseModel):
     machine_code: str
@@ -820,7 +889,9 @@ def admin_list_users(request: Request, key: Optional[str] = None):
     if not multi_user_enabled():
         return {"ok": True, "users": []}
     rows = db_query('''
-        SELECT u.*, COALESCE(d.c,0) AS device_count, COALESCE(k.c,0) AS key_count
+        SELECT u.id, u.username, u.role, u.status, u.expires_at, u.max_devices, u.bind_mode,
+               u.created_at, u.updated_at,
+               COALESCE(d.c,0) AS device_count, COALESCE(k.c,0) AS key_count
         FROM users u
         LEFT JOIN (SELECT user_id, COUNT(*) c FROM bound_devices GROUP BY user_id) d ON d.user_id=u.id
         LEFT JOIN (SELECT user_id, COUNT(*) c FROM api_keys GROUP BY user_id) k ON k.user_id=u.id
@@ -837,6 +908,7 @@ def admin_create_user(data: UserCreateIn, request: Request, key: Optional[str] =
     username = str(data.username or "").strip()
     if not username:
         raise HTTPException(status_code=400, detail="username required")
+    password_hash = make_password_hash(data.password) if str(data.password or "").strip() else None
 
     # V5.4：优先按“天数”创建到期时间；兼容旧 expires_at 字符串。
     if data.expires_days is not None:
@@ -846,15 +918,15 @@ def admin_create_user(data: UserCreateIn, request: Request, key: Optional[str] =
             days = 0
         if days > 0:
             row = db_query("""
-                INSERT INTO users(username, max_devices, expires_at, bind_mode)
-                VALUES(%s,%s,NOW() + (%s || ' days')::interval,'whitelist') RETURNING *
-            """, [username, int(data.max_devices or 3), days], one=True, commit=True)
+                INSERT INTO users(username, max_devices, expires_at, bind_mode, password_hash)
+                VALUES(%s,%s,NOW() + (%s || ' days')::interval,'whitelist',%s) RETURNING *
+            """, [username, int(data.max_devices or 3), days, password_hash], one=True, commit=True)
             return {"ok": True, "user": row}
 
     row = db_query("""
-        INSERT INTO users(username, max_devices, expires_at, bind_mode)
-        VALUES(%s,%s,NULLIF(%s,'')::timestamptz,'whitelist') RETURNING *
-    """, [username, int(data.max_devices or 3), data.expires_at or ""], one=True, commit=True)
+        INSERT INTO users(username, max_devices, expires_at, bind_mode, password_hash)
+        VALUES(%s,%s,NULLIF(%s,'')::timestamptz,'whitelist',%s) RETURNING *
+    """, [username, int(data.max_devices or 3), data.expires_at or "", password_hash], one=True, commit=True)
     return {"ok": True, "user": row}
 
 @app.patch("/admin/api/users/{user_id}")
@@ -891,6 +963,48 @@ def admin_generate_api_key(user_id: int, request: Request, key: Optional[str] = 
     row = db_query('''INSERT INTO api_keys(user_id,key_hash,key_prefix,key_plain) VALUES(%s,%s,%s,%s) RETURNING id,user_id,key_prefix,key_plain,status,created_at''', [user_id, api_key_hash(raw), prefix, raw], one=True, commit=True)
     return {"ok": True, "api_key": raw, "record": row}
 
+@app.post("/api/login-password")
+def login_password(data: PasswordLoginIn):
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    username = str(data.username or "").strip()
+    password = str(data.password or "")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password required")
+    user = db_query("SELECT * FROM users WHERE username=%s", [username], one=True)
+    check_plain_user_active(user)
+    if not user.get("password_hash") or not verify_password(password, user.get("password_hash")):
+        raise HTTPException(status_code=401, detail="username or password incorrect")
+    raw = get_or_create_login_api_key(int(user["id"]))
+    return {"ok": True, "role": "user", "api_key": raw, "url": f"/tiktok?api_key={raw}&v=63"}
+
+@app.post("/admin/api/users/{user_id}/password")
+def admin_reset_user_password(user_id: int, data: PasswordResetIn, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    password_hash = make_password_hash(data.password)
+    row = db_query("UPDATE users SET password_hash=%s, updated_at=NOW() WHERE id=%s RETURNING id,username", [password_hash, user_id], one=True, commit=True)
+    if not row:
+        raise HTTPException(status_code=404, detail="user not found")
+    return {"ok": True, "user": row}
+
+@app.post("/api/me/password")
+def change_my_password(data: PasswordChangeIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
+    if ctx["is_admin"]:
+        raise HTTPException(status_code=400, detail="admin password is ADMIN_KEY env")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    user = db_query("SELECT * FROM users WHERE id=%s", [ctx["user_id"]], one=True)
+    check_plain_user_active(user)
+    if user.get("password_hash") and not verify_password(data.old_password or "", user.get("password_hash")):
+        raise HTTPException(status_code=401, detail="old password incorrect")
+    password_hash = make_password_hash(data.new_password)
+    db_query("UPDATE users SET password_hash=%s, updated_at=NOW() WHERE id=%s", [password_hash, ctx["user_id"]], commit=True)
+    return {"ok": True}
+
 MOBILE_ADMIN_HTML = r"""
 <!doctype html>
 <html lang="zh-CN">
@@ -917,6 +1031,7 @@ h1{font-size:22px;margin:0;font-weight:900}
 .all-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .multi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .multi-grid .wide{grid-column:span 2}
+body:not(.is-admin-mode) .admin-only{display:none!important}
 .desktop-top-grid,.desktop-action-grid{display:none}
 
 .btn{border:0;border-radius:13px;color:#fff;font-size:15px;font-weight:850;padding:12px 8px;min-height:44px}
@@ -1553,8 +1668,8 @@ body.sync-collapsed{padding-bottom:42px}
 .bound-row input,.bound-row select{border:1px solid #d0d5dd;border-radius:10px;padding:10px;font-size:15px;min-width:0}
 .bound-row button,.bound-list button,.user-actions button{border:0;border-radius:10px;padding:10px;font-weight:900;background:#1d9bf0;color:#fff}
 .bound-list{display:grid;gap:8px}.bound-item{border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:14px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.bound-item .meta{color:#667085;font-size:12px;margin-top:3px}.bound-item button{background:#ff4d4f}.bound-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.bound-actions button{border:0;border-radius:10px;padding:11px;font-weight:900}.bound-cancel{background:#e5e7eb;color:#111827}.bound-save{background:#1db954;color:#fff}
-.user-panel{display:grid;gap:10px}.user-create{display:grid;grid-template-columns:1fr 90px 130px 90px;gap:8px}.user-create input{border:1px solid #d0d5dd;border-radius:10px;padding:10px}.user-item{border:1px solid #e5e7eb;border-radius:10px;padding:10px}.key-once{background:#fff4e5;color:#b54708;padding:8px;border-radius:8px;margin-top:6px;word-break:break-all;font-weight:900}
-@media (max-width:899px){.header-right-tools{gap:5px!important}.bound-row{grid-template-columns:1fr 70px 70px}.user-btn{display:none!important}.bind-btn,.refresh-btn,.mobile-header-toggle{padding-left:8px!important;padding-right:8px!important}.user-create{grid-template-columns:1fr 65px 110px}.user-create button{grid-column:1/-1}}
+.user-panel{display:grid;gap:10px}.user-create{display:grid;grid-template-columns:1fr 90px 130px 130px 90px;gap:8px}.user-create input{border:1px solid #d0d5dd;border-radius:10px;padding:10px}.user-item{border:1px solid #e5e7eb;border-radius:10px;padding:10px}.key-once{background:#fff4e5;color:#b54708;padding:8px;border-radius:8px;margin-top:6px;word-break:break-all;font-weight:900}
+@media (max-width:899px){.header-right-tools{gap:5px!important}.bound-row{grid-template-columns:1fr 70px 70px}.user-btn{display:none!important}.bind-btn,.refresh-btn,.mobile-header-toggle{padding-left:8px!important;padding-right:8px!important}.user-create{grid-template-columns:1fr 65px 90px 90px}.user-create button{grid-column:1/-1}}
 
 
 /* V5.3：API Key 生成后固定弹窗，不被自动刷新冲掉 */
@@ -1728,7 +1843,7 @@ body.sync-collapsed{padding-bottom:42px}
     padding:5px 7px!important;
   }
   .user-create{
-    grid-template-columns:minmax(0,2fr) 46px 62px 58px!important;
+    grid-template-columns:minmax(0,2fr) 46px 62px 86px 58px!important;
     gap:6px!important;
     align-items:stretch!important;
   }
@@ -1740,6 +1855,7 @@ body.sync-collapsed{padding-bottom:42px}
   #newUsername{width:100%!important}
   #newMax{width:46px!important}
   #newDays{width:62px!important}
+  #newPassword{width:86px!important}
   .user-create button{
     grid-column:auto!important;
     width:58px!important;
@@ -1851,14 +1967,14 @@ body.sync-collapsed{padding-bottom:42px}
         <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
         <label><span class="offline-over-text">离线超过</span> <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
       </div>
-      <button class="mobile-header-toggle mobile-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
-      <button class="refresh-btn bind-btn" onclick="openBoundModal()">绑定设备</button><button class="refresh-btn user-btn" id="userManageBtn" onclick="openUserModal()">用户管理</button><button class="refresh-btn" onclick="loadDevices()">刷新</button>
+      <button class="mobile-header-toggle mobile-only admin-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
+      <button class="refresh-btn bind-btn" onclick="openBoundModal()">绑定设备</button><button class="refresh-btn" id="passwordBtn" onclick="changeMyPassword()">改密码</button><button class="refresh-btn user-btn" id="userManageBtn" onclick="openUserModal()">用户管理</button><button class="refresh-btn" onclick="loadDevices()">刷新</button>
     </div>
   </div>
 </div>
 
 <div class="wrap">
-  <div id="mobileAllControls" class="all-grid mobile-only mobile-control-section collapsed">
+  <div id="mobileAllControls" class="all-grid mobile-only mobile-control-section collapsed admin-only">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
     <button class="btn orange" onclick="sendAll('restart_app_only')">全部重启软件</button>
@@ -1871,7 +1987,7 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
   </div>
 
-  <div class="desktop-top-grid">
+  <div class="desktop-top-grid admin-only">
     <button class="btn blue" onclick="sendAll('open_target')">全部打开软件</button>
     <button class="btn blue" onclick="sendAll('start_target')">全部启动软件</button>
     <button class="btn green" onclick="sendAll('start_monitor')">全部打开监控</button>
@@ -1882,7 +1998,7 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="btn dark" onclick="sendAll('update_github_config')">全部更新GitHub</button>
   </div>
 
-  <div id="mobileSelectedControls" class="multi-grid multi mobile-only mobile-control-section collapsed">
+  <div id="mobileSelectedControls" class="multi-grid multi mobile-only mobile-control-section collapsed admin-only">
     <button class="btn blue" onclick="sendSelected('open_target')">打开</button>
     <button class="btn blue" onclick="sendSelected('start_target')">启动</button>
     <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
@@ -1897,7 +2013,7 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="btn gray wide" onclick="clearSelected()">取消选择</button>
   </div>
 
-  <div class="desktop-action-grid">
+  <div class="desktop-action-grid admin-only">
     <button class="btn blue" onclick="sendSelected('open_target')">打开</button>
     <button class="btn blue" onclick="sendSelected('start_target')">启动</button>
     <button class="btn green" onclick="sendSelected('start_monitor')">开监控</button>
@@ -1983,6 +2099,7 @@ body.sync-collapsed{padding-bottom:42px}
       <input id="newUsername" placeholder="用户名">
       <input id="newMax" type="number" value="3" placeholder="设备数">
       <input id="newDays" placeholder="到期天数">
+      <input id="newPassword" type="password" placeholder="登录密码">
       <button onclick="createUser()">创建<br>用户</button>
     </div>
     <div id="userList" class="user-panel"></div>
@@ -2365,7 +2482,7 @@ async function loadUsers(){
     const list = document.getElementById("userList");
     const users = data.users || [];
     if(!users.length){ list.innerHTML = `<div class="small">暂无用户，请先创建</div>`; return; }
-    list.innerHTML = users.map(u=>`<div class="user-item"><b>${escapeHtml(u.username)}</b>　ID:${u.id}　状态:${u.status}　设备:${u.device_count||0}/${u.max_devices}　密钥:${u.key_count||0}<div class="user-actions" style="margin-top:8px"><button onclick="generateKey(${u.id})">生成密钥</button><button onclick="showUserKeys(${u.id})">查看密钥</button><button onclick="adminAddDevice(${u.id})">加设备</button><button onclick="deleteUser(${u.id})">删用户</button><button onclick="toggleUser(${u.id}, '${u.status==='active'?'disabled':'active'}')">${u.status==='active'?'禁用':'启用'}</button></div><div id="key_${u.id}"></div></div>`).join("");
+    list.innerHTML = users.map(u=>`<div class="user-item"><b>${escapeHtml(u.username)}</b>　ID:${u.id}　状态:${u.status}　设备:${u.device_count||0}/${u.max_devices}　密钥:${u.key_count||0}<div class="user-actions" style="margin-top:8px"><button onclick="generateKey(${u.id})">生成密钥</button><button onclick="showUserKeys(${u.id})">查看密钥</button><button onclick="adminResetPassword(${u.id})">改密码</button><button onclick="adminAddDevice(${u.id})">加设备</button><button onclick="deleteUser(${u.id})">删用户</button><button onclick="toggleUser(${u.id}, '${u.status==='active'?'disabled':'active'}')">${u.status==='active'?'禁用':'启用'}</button></div><div id="key_${u.id}"></div></div>`).join("");
   }catch(e){ await centerAlert("读取用户失败："+e.message); }
 }
 async function createUser(){
@@ -2373,22 +2490,25 @@ async function createUser(){
     const usernameEl = document.getElementById("newUsername");
     const maxEl = document.getElementById("newMax");
     const daysEl = document.getElementById("newDays");
+    const passwordEl = document.getElementById("newPassword");
 
     const username = (usernameEl ? usernameEl.value : "").trim();
     const max_devices = Number(maxEl && maxEl.value ? maxEl.value : 3);
     const expires_days = Number(daysEl && daysEl.value ? daysEl.value : 0);
+    const password = (passwordEl ? passwordEl.value : "").trim();
 
     if(!username){ await centerAlert("请输入用户名"); return; }
     if(!expires_days || expires_days <= 0){ await centerAlert("请输入到期天数，例如 30 或 365"); return; }
 
     await api("/admin/api/users", {
       method:"POST",
-      body:JSON.stringify({username, max_devices, expires_days})
+      body:JSON.stringify({username, max_devices, expires_days, password})
     });
 
     if(usernameEl) usernameEl.value="";
     if(maxEl) maxEl.value="3";
     if(daysEl) daysEl.value="";
+    if(passwordEl) passwordEl.value="";
     await loadUsers();
     await centerAlert("用户创建成功");
   }
@@ -2414,6 +2534,18 @@ async function showUserKeys(uid){
     }).join("\n\n");
     showGeneratedApiKey(text);
   }catch(e){ await centerAlert("查看密钥失败："+e.message); }
+}
+
+async function adminResetPassword(uid){
+  try{
+    const password = await centerPrompt("输入新的登录密码，至少 6 位：", "");
+    if(!password) return;
+    await api(`/admin/api/users/${uid}/password`, {
+      method:"POST",
+      body:JSON.stringify({password})
+    });
+    await centerAlert("密码已修改");
+  }catch(e){ await centerAlert("修改密码失败：" + e.message); }
 }
 
 async function adminAddDevice(uid){
@@ -2443,7 +2575,22 @@ async function toggleUser(uid,status){
   try{ await api(`/admin/api/users/${uid}`, {method:"PATCH", body:JSON.stringify({status})}); await loadUsers(); }
   catch(e){ await centerAlert("操作失败："+e.message); }
 }
-document.addEventListener("DOMContentLoaded", ()=>{ const b=document.getElementById("userManageBtn"); if(b && !IS_ADMIN) b.style.display="none"; const m=document.getElementById("mobileUserBtn"); if(m && !IS_ADMIN) m.style.display="none"; });
+async function changeMyPassword(){
+  try{
+    const old_password = await centerPrompt("输入当前密码：", "");
+    if(!old_password) return;
+    const new_password = await centerPrompt("输入新密码，至少 6 位：", "");
+    if(!new_password) return;
+    const repeat = await centerPrompt("再输入一次新密码：", "");
+    if(new_password !== repeat){ await centerAlert("两次新密码不一致"); return; }
+    await api("/api/me/password", {
+      method:"POST",
+      body:JSON.stringify({old_password, new_password})
+    });
+    await centerAlert("密码已修改");
+  }catch(e){ await centerAlert("修改密码失败：" + e.message); }
+}
+document.addEventListener("DOMContentLoaded", ()=>{ const b=document.getElementById("userManageBtn"); if(b && !IS_ADMIN) b.style.display="none"; const m=document.getElementById("mobileUserBtn"); if(m && !IS_ADMIN) m.style.display="none"; const p=document.getElementById("passwordBtn"); if(p && IS_ADMIN) p.style.display="none"; });
 
 async function loadDevices(){
   try{
@@ -2478,8 +2625,22 @@ async function sendSelected(cmd){
   const list = [...selected];
   if(list.length===0){ alert("请先勾选设备"); return; }
   if(!confirm(`确定给选中的 ${list.length} 台设备下发 ${cmd}？`)) return;
-  for(const code of list){
-    await sendOne(code,cmd,cmd==="screenshot");
+  const results = await Promise.all(list.map(code =>
+    api(`/api/devices/${encodeURIComponent(code)}/command`, {
+      method:"POST",
+      body:JSON.stringify({command:cmd})
+    }).then(()=>({ok:true, code})).catch(e=>({ok:false, code, error:e.message}))
+  ));
+  const failed = results.filter(r=>!r.ok);
+  if(failed.length){
+    alert(`部分设备下发失败：${failed.length}/${list.length}\n` + failed.map(r=>`${r.code}: ${r.error}`).join("\n"));
+  }
+  if(cmd==="screenshot"){
+    setTimeout(loadDevices, 4500);
+    setTimeout(loadDevices, 8500);
+    setTimeout(loadDevices, 12500);
+  }else{
+    setTimeout(loadDevices, 1000);
   }
 }
 async function screenshotSelected(){ await sendSelected("screenshot"); }
@@ -2705,16 +2866,64 @@ setInterval(loadDevices,5000);
 """
 
 
+LOGIN_HTML = r"""
+<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>TikTok 集群控制台登录</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px;background:#f4f6fa;color:#111827}
+.box{max-width:420px;margin:60px auto;background:#fff;border-radius:18px;padding:22px;box-shadow:0 8px 28px rgba(15,23,42,.12)}
+h2{margin:0 0 18px;font-size:22px;font-weight:950}
+input,button{font-size:17px;padding:13px;border-radius:12px;margin-top:12px;width:100%;box-sizing:border-box}
+input{border:1px solid #d0d5dd}
+button{border:0;background:#1d9bf0;color:#fff;font-weight:900}
+.err{display:none;margin-top:12px;color:#d92d20;font-size:14px;font-weight:800}
+</style></head>
+<body><div class='box'>
+<h2>TikTok 集群控制台</h2>
+<input id='username' placeholder='用户名' autocomplete='username'>
+<input id='password' placeholder='密码' type='password' autocomplete='current-password'>
+<button onclick='goPasswordLogin()'>登录</button>
+<div id='err' class='err'></div>
+</div>
+<script>
+function showErr(msg){
+  const err = document.getElementById('err');
+  err.textContent = msg || '登录失败';
+  err.style.display='block';
+}
+async function goPasswordLogin(){
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  document.getElementById('err').style.display='none';
+  if(!username || !password){ showErr('请输入用户名和密码'); return; }
+  try{
+    const r = await fetch('/api/login-password', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username,password})
+    });
+    const data = await r.json();
+    if(!r.ok || !data.ok) throw new Error(data.detail || '登录失败');
+    location.href = data.url;
+  }catch(e){ showErr(e.message); }
+}
+document.getElementById('password').addEventListener('keydown', function(e){
+  if(e.key === 'Enter') goPasswordLogin();
+});
+</script></body></html>
+"""
+
+
 
 @app.get("/login")
-def unified_login(request: Request, token: str):
+def unified_login(request: Request, token: Optional[str] = ""):
     """
     V6.1：统一登录入口。
     输入 ADMIN_KEY 自动进管理员；输入用户 API Key 自动进普通用户控制台。
     """
     raw = str(token or "").strip()
     if not raw:
-        raise HTTPException(status_code=401, detail="empty token")
+        return HTMLResponse(LOGIN_HTML, status_code=401)
 
     if admin_auth_ok(request, raw):
         return {"ok": True, "role": "admin", "url": f"/tiktok?key={raw}&v=63"}
@@ -2745,6 +2954,7 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
             user_row = None
 
     if not is_admin and not user_row:
+        return HTMLResponse(LOGIN_HTML, status_code=401)
         return HTMLResponse("""
         <html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
         <title>TikTok 集群控制台登录</title>
