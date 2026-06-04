@@ -1052,6 +1052,11 @@ h1{font-size:22px;margin:0;font-weight:900}
 .multi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .multi-grid .wide{grid-column:span 2}
 body:not(.is-admin-mode) .admin-only{display:none!important}
+body.header-controls-collapsed .header-right-tools,
+body.header-controls-collapsed .desktop-top-grid,
+body.header-controls-collapsed .desktop-action-grid,
+body.header-controls-collapsed #mobileAllControls,
+body.header-controls-collapsed #mobileSelectedControls{display:none!important}
 .desktop-top-grid,.desktop-action-grid{display:none}
 
 .btn{border:0;border-radius:13px;color:#fff;font-size:15px;font-weight:850;padding:12px 8px;min-height:44px}
@@ -1752,6 +1757,7 @@ body.sync-collapsed{padding-bottom:42px}
   flex:1 1 auto;
   min-width:0;
 }
+.header-collapse-btn{border:0;border-radius:10px;background:#eef2f7;color:#1d9bf0;font-size:18px;font-weight:900;width:40px;height:34px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
 .mobile-user-btn{
   flex:0 0 auto;
   border:0;
@@ -1764,7 +1770,7 @@ body.sync-collapsed{padding-bottom:42px}
   line-height:1;
 }
 @media (min-width:900px){
-  .stats-line-wrap{display:block}
+  .stats-line-wrap{display:flex!important;align-items:center!important}
   .mobile-user-btn{display:none!important}
 }
 @media (max-width:899px){
@@ -1981,7 +1987,7 @@ body.sync-collapsed{padding-bottom:42px}
     <h1>TikTok 集群控制台 <span id="userExpireTitle" class="user-expire-title"></span></h1>
   </div>
   <div class="header-status-row">
-    <div class="stats-line-wrap"><div class="stats" id="stats">加载中...</div><button id="mobileUserBtn" class="mobile-user-btn mobile-only admin-only" onclick="openUserModal()">用户</button></div>
+    <div class="stats-line-wrap"><div class="stats" id="stats">加载中...</div><button id="mobileUserBtn" class="mobile-user-btn mobile-only admin-only" onclick="openUserModal()">用户</button><button id="headerControlsToggle" class="header-collapse-btn" onclick="toggleHeaderControls()">⌄</button></div>
     <div class="header-right-tools">
       <div class="offline-cleaner">
         <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
@@ -2146,6 +2152,7 @@ const ADMIN_KEY = keyFromUrl || (apiKeyFromUrl ? "" : (localStorage.getItem("ADM
 const USER_API_KEY = apiKeyFromUrl || localStorage.getItem("USER_API_KEY") || "";
 const IS_ADMIN = !!ADMIN_KEY;
 if(IS_ADMIN){ document.body.classList.add("is-admin-mode"); }
+document.body.classList.add("header-controls-collapsed");
 let DEVICES = [];
 let selected = new Set();
 
@@ -2223,6 +2230,20 @@ function centerPrompt(message, defaultValue=""){
   return centerDialog(message, {confirm:true, input:true, defaultValue, okText:"确定", cancelText:"取消"});
 }
 
+
+function setHeaderControlsCollapsed(collapsed){
+  document.body.classList.toggle("header-controls-collapsed", collapsed);
+  const btn = document.getElementById("headerControlsToggle");
+  if(btn) btn.textContent = collapsed ? "⌄" : "⌃";
+  localStorage.setItem("HEADER_CONTROLS_COLLAPSED", collapsed ? "1" : "0");
+}
+function toggleHeaderControls(){
+  setHeaderControlsCollapsed(!document.body.classList.contains("header-controls-collapsed"));
+}
+document.addEventListener("DOMContentLoaded", ()=>{
+  const saved = localStorage.getItem("HEADER_CONTROLS_COLLAPSED");
+  setHeaderControlsCollapsed(saved === null ? true : saved === "1");
+});
 
 function setMobileControlsCollapsed(collapsed){
   const allBox = document.getElementById("mobileAllControls");
@@ -2505,7 +2526,7 @@ async function loadUsers(){
     const list = document.getElementById("userList");
     const users = data.users || [];
     if(!users.length){ list.innerHTML = `<div class="small">暂无用户，请先创建</div>`; return; }
-    list.innerHTML = users.map(u=>`<div class="user-item"><b>${escapeHtml(u.username)}</b>　ID:${u.id}　状态:${u.status}　设备:${u.device_count||0}/${u.max_devices}　密钥:${u.key_count||0}<div class="user-actions" style="margin-top:8px"><button onclick="generateKey(${u.id})">生成密钥</button><button onclick="showUserKeys(${u.id})">查看密钥</button><button onclick="adminResetPassword(${u.id})">改密码</button><button onclick="adminAddDevice(${u.id})">加设备</button><button onclick="deleteUser(${u.id})">删用户</button><button onclick="toggleUser(${u.id}, '${u.status==='active'?'disabled':'active'}')">${u.status==='active'?'禁用':'启用'}</button></div><div id="key_${u.id}"></div></div>`).join("");
+    list.innerHTML = users.map(u=>`<div class="user-item"><b>${escapeHtml(u.username)}</b>　ID:${u.id}　状态:${u.status}　设备:${u.device_count||0}/${u.max_devices}　密钥:${u.key_count||0}<div class="user-actions" style="margin-top:8px"><button onclick="generateKey(${u.id})">生成密钥</button><button onclick="showUserKeys(${u.id})">查看密钥</button><button onclick="adminResetPassword(${u.id})">改密码</button><button onclick="adminSetMaxDevices(${u.id}, ${u.max_devices||0})">改设备数</button><button onclick="adminAddDevice(${u.id})">加设备</button><button onclick="deleteUser(${u.id})">删用户</button><button onclick="toggleUser(${u.id}, '${u.status==='active'?'disabled':'active'}')">${u.status==='active'?'禁用':'启用'}</button></div><div id="key_${u.id}"></div></div>`).join("");
   }catch(e){ await centerAlert("读取用户失败："+e.message); }
 }
 async function createUser(){
@@ -2569,6 +2590,24 @@ async function adminResetPassword(uid){
     });
     await centerAlert("密码已修改");
   }catch(e){ await centerAlert("修改密码失败：" + e.message); }
+}
+
+async function adminSetMaxDevices(uid, currentMax){
+  try{
+    const value = await centerPrompt("输入新的设备数量上限：", String(currentMax || 1));
+    if(!value) return;
+    const max_devices = Number(value);
+    if(!Number.isInteger(max_devices) || max_devices < 1){
+      await centerAlert("设备数量必须是大于 0 的整数");
+      return;
+    }
+    await api(`/admin/api/users/${uid}`, {
+      method:"PATCH",
+      body:JSON.stringify({max_devices})
+    });
+    await centerAlert("设备数量已修改");
+    await loadUsers();
+  }catch(e){ await centerAlert("修改设备数量失败：" + e.message); }
 }
 
 async function adminAddDevice(uid){
