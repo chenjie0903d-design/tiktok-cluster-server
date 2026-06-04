@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.3")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.4")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -96,6 +96,11 @@ def normalize_machine_code(machine_code: str) -> str:
     code = str(machine_code or "").strip()
     code = re.sub(r"[^A-Za-z0-9_\-]", "", code)
     return code[:128]
+
+
+def is_bad_device_name_value(name: str) -> bool:
+    value = str(name or "").strip()
+    return value in ("", "1", "未知设备", "未识别设备名")
 
 
 def init_db():
@@ -506,7 +511,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v6.3 multi-user is running", "admin": "/tiktok", "version":"v26-web-v6.3-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v6.4 multi-user is running", "admin": "/tiktok", "version":"v26-web-v6.4-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -521,12 +526,28 @@ def heartbeat(data: Heartbeat, request: Request):
         ctx = check_bound_device_client(machine_code)
         user_id = int(ctx["user_id"])
         username = ctx.get("username") or ""
-        db_query("""
-            UPDATE bound_devices SET last_seen=NOW(), device_name=COALESCE(NULLIF(%s,''), device_name), client_version=%s
-            WHERE machine_code=%s
-        """, [str(data.device_name or "").strip(), data.app_version, machine_code], commit=True)
+        incoming_name = str(data.device_name or "").strip()
+        bound_name = str((ctx.get("bound_device") or {}).get("device_name") or "").strip()
+        if is_bad_device_name_value(bound_name) and not is_bad_device_name_value(incoming_name):
+            db_query("""
+                UPDATE bound_devices SET last_seen=NOW(), device_name=%s, client_version=%s
+                WHERE machine_code=%s
+            """, [incoming_name, data.app_version, machine_code], commit=True)
+        else:
+            db_query("""
+                UPDATE bound_devices SET last_seen=NOW(), client_version=%s
+                WHERE machine_code=%s
+            """, [data.app_version, machine_code], commit=True)
 
     old = devices.get(machine_code, {})
+    old_device_name = old.get("device_name", "")
+    incoming_device_name = str(data.device_name or "").strip()
+    if is_bad_device_name_value(old_device_name) and not is_bad_device_name_value(incoming_device_name):
+        display_device_name = incoming_device_name
+    elif not is_bad_device_name_value(old_device_name):
+        display_device_name = old_device_name
+    else:
+        display_device_name = incoming_device_name
     location_carrier = data.location_carrier
     if not location_carrier:
         location_carrier = f"{data.location or ''}{data.carrier or ''}".strip()
@@ -538,7 +559,7 @@ def heartbeat(data: Heartbeat, request: Request):
         "daily_seq": daily_seq,
         "daily_seq_date": daily_seq_date,
         "machine_code": machine_code,
-        "device_name": (old.get("device_name", "") if str(data.device_name or "").strip() in ("", "1", "未知设备", "未识别设备名") and old.get("device_name") else data.device_name),
+        "device_name": display_device_name,
         "status": data.status,
         "running": data.running,
         "work_time": data.work_time,
@@ -598,13 +619,22 @@ def list_devices(request: Request, key: Optional[str] = None, api_key: Optional[
             code = bd["machine_code"]
             if code in seen:
                 continue
+            # V6.4：即使内存里还没有该设备，也用数据库 last_seen 判断是否在线。
+            # 这样服务端重启/多进程/内存丢失后，只要客户端心跳更新了 DB，控制台也不会一直显示离线。
+            db_last_seen_ts = 0
+            try:
+                if bd.get("last_seen"):
+                    db_last_seen_ts = bd["last_seen"].timestamp()
+            except Exception:
+                db_last_seen_ts = 0
+            is_db_online = bool(db_last_seen_ts and now - db_last_seen_ts <= 120)
             item = {
                 "user_id": bd["user_id"], "username": bd.get("username", ""),
                 "machine_code": code,
                 "device_name": bd.get("device_name") or code[:8],
-                "status": "disabled" if bd.get("status") == "disabled" else "offline",
+                "status": "online" if is_db_online else ("disabled" if bd.get("status") == "disabled" else "offline"),
                 "running": False,
-                "last_seen": 0,
+                "last_seen": db_last_seen_ts,
                 "app_version": bd.get("client_version") or "",
                 "public_ip": "", "location":"", "carrier":"", "location_carrier":"",
                 "daily_seq": 999999,
@@ -617,9 +647,27 @@ def list_devices(request: Request, key: Optional[str] = None, api_key: Optional[
 def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     machine_code = normalize_machine_code(machine_code)
     verify_device_access(request, machine_code, key, api_key)
+    # V6.4：允许给已绑定设备排队，即使内存 devices 里暂时没有该设备。
+    # 这样 DB 已绑定但内存丢失/刚重启时，改名等命令不会直接 404。
     if machine_code not in devices:
-        # 允许给已绑定但当前离线的设备排队？为了避免无效堆积，保持旧逻辑：必须已心跳出现。
-        raise HTTPException(status_code=404, detail="device not found")
+        if multi_user_enabled():
+            bd = get_bound_device(machine_code)
+            if not bd:
+                raise HTTPException(status_code=404, detail="device not found")
+            devices[machine_code] = {
+                "user_id": bd.get("user_id"),
+                "username": bd.get("username", ""),
+                "machine_code": machine_code,
+                "device_name": bd.get("device_name") or machine_code[:8],
+                "status": "offline",
+                "running": False,
+                "last_seen": 0,
+                "app_version": bd.get("client_version") or "",
+                "public_ip": "", "location":"", "carrier":"", "location_carrier":"",
+                "daily_seq": 999999,
+            }
+        else:
+            raise HTTPException(status_code=404, detail="device not found")
     item = {"id": str(uuid.uuid4()), "command": cmd.command, "value": cmd.value, "created_at": time.time()}
     commands.setdefault(machine_code, []).append(item)
     if str(cmd.command).strip() == "rename" and cmd.value:
@@ -702,7 +750,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v6.3-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_3", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0", "single_login_auto_role_v6_1", "tiktok_path_v6_2", "machine_code_client_auth_v6_3"]}
+    return {"ok": True, "version": "v26-web-v6.4-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_4", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0", "single_login_auto_role_v6_1", "tiktok_path_v6_2", "machine_code_client_auth_v6_3", "db_last_seen_online_v6_4", "rename_queue_offline_bound_v6_4"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
