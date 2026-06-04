@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.0")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.1")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -143,10 +143,16 @@ def extract_bearer(request: Request, api_key: Optional[str] = None):
 
 
 def admin_auth_ok(request: Request, key: Optional[str] = None):
+    """
+    V5.1：后台密码必须严格校验。
+    如果 Railway 没有设置 ADMIN_KEY，后台不再放行，避免任意 key 都能进。
+    """
     expected = os.environ.get("ADMIN_KEY", "").strip()
-    if not expected:
-        return True
     provided = (key or request.headers.get("X-Admin-Key") or "").strip()
+
+    if not expected:
+        return False
+
     return hmac.compare_digest(provided, expected)
 
 
@@ -325,7 +331,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V5.0：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V5.1：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -390,7 +396,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.0-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.1-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -594,7 +600,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v5.0-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_0"]}
+    return {"ok": True, "version": "v26-web-v5.1-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_1", "admin_key_strict"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -781,7 +787,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V5.0</title>
+<title>TikTok 集群控制台 Web V5.1</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
