@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.1")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.2")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -331,7 +331,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V5.1：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V5.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -396,7 +396,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.1-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.2-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -600,7 +600,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v5.1-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_1", "admin_key_strict"]}
+    return {"ok": True, "version": "v26-web-v5.2-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_2", "admin_key_strict", "admin_page_auth_gate"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -787,7 +787,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V5.1</title>
+<title>TikTok 集群控制台 Web V5.2</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -2167,22 +2167,50 @@ setInterval(loadDevices,5000);
 
 @app.get("/admin", response_class=HTMLResponse)
 def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
-    # ADMIN_KEY 可以看全部；api_key 可以看自己的控制台。
-    try:
-        get_auth_context(request, key, api_key)
-    except Exception:
+    """
+    V5.2：页面层也必须鉴权。
+    - ADMIN：/admin?key=ADMIN_KEY
+    - 普通用户：/admin?api_key=用户API密钥
+    - 不带 key/api_key 或错误时，只显示登录页，不返回控制台 HTML。
+    """
+    is_admin = admin_auth_ok(request, key)
+    user_row = None
+    if api_key:
+        try:
+            user_row = get_user_by_api_key(api_key)
+            check_user_active(user_row)
+        except Exception:
+            user_row = None
+
+    if not is_admin and not user_row:
         return HTMLResponse("""
         <html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
-        <style>body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px}input,button{font-size:18px;padding:12px;border-radius:10px;margin-top:10px;width:100%}</style></head>
-        <body><h2>请输入控制台密码或用户API密钥</h2>
-        <input id='k' placeholder='ADMIN_KEY 或 tk_live_xxx' type='password'>
-        <button onclick='goAdmin()'>管理员进入</button><button onclick='goUser()'>用户进入</button>
+        <title>TikTok 控制台登录</title>
+        <style>
+        body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px;background:#f4f6fa;color:#111827}
+        .box{max-width:420px;margin:60px auto;background:#fff;border-radius:18px;padding:22px;box-shadow:0 8px 28px rgba(15,23,42,.12)}
+        h2{margin:0 0 16px;font-size:22px}
+        input,button{font-size:17px;padding:12px;border-radius:12px;margin-top:10px;width:100%;box-sizing:border-box}
+        input{border:1px solid #d0d5dd}
+        button{border:0;background:#1d9bf0;color:#fff;font-weight:900}
+        .tip{font-size:13px;color:#667085;margin-top:12px;line-height:1.45}
+        </style></head>
+        <body><div class='box'>
+        <h2>TikTok 集群控制台</h2>
+        <input id='k' placeholder='管理员密码 ADMIN_KEY' type='password'>
+        <button onclick='goAdmin()'>管理员进入</button>
+        <input id='a' placeholder='用户 API 密钥 tk_live_xxx' type='password'>
+        <button onclick='goUser()'>用户进入</button>
+        <div class='tip'>管理员用 ADMIN_KEY；普通用户用 API 密钥。没有正确密码不会加载控制台。</div>
+        </div>
         <script>
-        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)}
-        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('k').value)}
+        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=52'}
+        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=52'}
         </script></body></html>
         """, status_code=401)
+
     return HTMLResponse(MOBILE_ADMIN_HTML)
+
 
 @app.get("/api/devices/{machine_code}/screenshot/image")
 def get_screenshot_image(machine_code: str, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
