@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.5")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.7")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -334,7 +334,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V5.5：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V5.7：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -399,7 +399,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.5-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.7-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -603,7 +603,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v5.5-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_5", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title"]}
+    return {"ok": True, "version": "v26-web-v5.7-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_7", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -895,7 +895,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V5.5</title>
+<title>TikTok 集群控制台 Web V5.7</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -1596,6 +1596,63 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+
+/* V5.6：修复用户管理弹窗层级，提示框必须在最上层 */
+.dialog-modal{z-index:10050 !important}
+.input-modal{z-index:10060 !important}
+.key-modal{z-index:10070 !important}
+.user-modal,.user-manager-modal,.bind-modal{z-index:9000}
+
+
+/* V5.7：手机端刷新时间后面增加“用户”按钮 */
+.stats-line-wrap{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+}
+.stats-line-wrap .stats{
+  flex:1 1 auto;
+  min-width:0;
+}
+.mobile-user-btn{
+  flex:0 0 auto;
+  border:0;
+  border-radius:10px;
+  background:#e8f3ff;
+  color:#1d9bf0;
+  font-weight:950;
+  font-size:17px;
+  padding:7px 10px;
+  line-height:1;
+}
+@media (min-width:900px){
+  .stats-line-wrap{display:block}
+  .mobile-user-btn{display:none!important}
+}
+@media (max-width:899px){
+  .stats-line-wrap{
+    display:flex!important;
+    align-items:center!important;
+    justify-content:flex-start!important;
+    gap:7px!important;
+  }
+  .stats-line-wrap .stats{
+    white-space:normal!important;
+    line-height:1.18!important;
+  }
+  .mobile-user-btn{
+    display:inline-flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    min-width:48px;
+    height:32px;
+    padding:6px 8px!important;
+    font-size:17px!important;
+    margin-left:2px;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -1617,7 +1674,7 @@ body.sync-collapsed{padding-bottom:42px}
     <h1>TikTok 集群控制台 <span id="userExpireTitle" class="user-expire-title"></span></h1>
   </div>
   <div class="header-status-row">
-    <div class="stats" id="stats">加载中...</div>
+    <div class="stats-line-wrap"><div class="stats" id="stats">加载中...</div><button id="mobileUserBtn" class="mobile-user-btn mobile-only" onclick="openUserModal()">用户</button></div>
     <div class="header-right-tools">
       <div class="offline-cleaner">
         <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
@@ -1753,8 +1810,8 @@ body.sync-collapsed{padding-bottom:42px}
     <div class="bound-title">用户管理</div>
     <div class="user-create">
       <input id="newUsername" placeholder="用户名">
-      <input id="newMaxDevices" type="number" value="3" placeholder="设备数">
-      <input id="newDays" placeholder="到期天数，如30">
+      <input id="newMax" type="number" value="3" placeholder="设备数">
+      <input id="newDays" placeholder="到期天数，如365">
       <button onclick="createUser()">创建用户</button>
     </div>
     <div id="userList" class="user-panel"></div>
@@ -2138,17 +2195,27 @@ async function loadUsers(){
 }
 async function createUser(){
   try{
-    const username = document.getElementById("newUsername").value.trim();
-    const max_devices = Number(document.getElementById("newMax").value || 3);
-    const expires_days = Number(document.getElementById("newDays").value || 0);
+    const usernameEl = document.getElementById("newUsername");
+    const maxEl = document.getElementById("newMax");
+    const daysEl = document.getElementById("newDays");
+
+    const username = (usernameEl ? usernameEl.value : "").trim();
+    const max_devices = Number(maxEl && maxEl.value ? maxEl.value : 3);
+    const expires_days = Number(daysEl && daysEl.value ? daysEl.value : 0);
+
+    if(!username){ await centerAlert("请输入用户名"); return; }
+    if(!expires_days || expires_days <= 0){ await centerAlert("请输入到期天数，例如 30 或 365"); return; }
+
     await api("/admin/api/users", {
       method:"POST",
       body:JSON.stringify({username, max_devices, expires_days})
     });
-    document.getElementById("newUsername").value="";
-    document.getElementById("newMax").value="";
-    document.getElementById("newDays").value="";
+
+    if(usernameEl) usernameEl.value="";
+    if(maxEl) maxEl.value="3";
+    if(daysEl) daysEl.value="";
     await loadUsers();
+    await centerAlert("用户创建成功");
   }
   catch(e){ await centerAlert("创建失败："+e.message); }
 }
@@ -2201,7 +2268,7 @@ async function toggleUser(uid,status){
   try{ await api(`/admin/api/users/${uid}`, {method:"PATCH", body:JSON.stringify({status})}); await loadUsers(); }
   catch(e){ await centerAlert("操作失败："+e.message); }
 }
-document.addEventListener("DOMContentLoaded", ()=>{ const b=document.getElementById("userManageBtn"); if(b && !IS_ADMIN) b.style.display="none"; });
+document.addEventListener("DOMContentLoaded", ()=>{ const b=document.getElementById("userManageBtn"); if(b && !IS_ADMIN) b.style.display="none"; const m=document.getElementById("mobileUserBtn"); if(m && !IS_ADMIN) m.style.display="none"; });
 
 async function loadDevices(){
   try{
@@ -2502,8 +2569,8 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
         <div class='tip'>管理员用 ADMIN_KEY；普通用户用 API 密钥。没有正确密码不会加载控制台。</div>
         </div>
         <script>
-        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=55'}
-        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=55'}
+        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=57'}
+        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=57'}
         </script></body></html>
         """, status_code=401)
 
