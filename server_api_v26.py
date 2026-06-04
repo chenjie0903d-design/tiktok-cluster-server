@@ -712,24 +712,22 @@ def admin_add_user_bound_device(user_id: int, data: BoundDeviceIn, request: Requ
     if not multi_user_enabled():
         raise HTTPException(status_code=400, detail="database disabled")
     code = normalize_machine_code(data.machine_code)
-    if not code:
-        raise HTTPException(status_code=400, detail="machine_code empty")
-    u = db_query("SELECT id,max_devices FROM users WHERE id=%s", [user_id], one=True)
-    if not u:
-        raise HTTPException(status_code=404, detail="user not found")
-    old = db_query("SELECT user_id FROM bound_devices WHERE machine_code=%s", [code], one=True)
+    if len(code) < 4:
+        raise HTTPException(status_code=400, detail="machine_code invalid")
+    old = get_bound_device(code)
     if old and int(old["user_id"]) != int(user_id):
         raise HTTPException(status_code=409, detail="machine_code bound to another user")
-    if not old:
-        cnt = db_query("SELECT COUNT(*) AS c FROM bound_devices WHERE user_id=%s", [user_id], one=True)["c"]
-        if int(cnt) >= int(u.get("max_devices") or 0):
-            raise HTTPException(status_code=403, detail="device limit reached")
-    row = db_query("""
-        INSERT INTO bound_devices(user_id,machine_code,device_name,bind_source)
-        VALUES(%s,%s,%s,'manual_admin')
-        ON CONFLICT(machine_code) DO UPDATE SET device_name=EXCLUDED.device_name,status='active'
-        RETURNING *
-    """, [user_id, code, data.device_name or code[:8]], one=True, commit=True)
+    if old:
+        row = db_query("""
+            UPDATE bound_devices
+            SET device_name=COALESCE(NULLIF(%s,''), device_name),
+                status='active',
+                bind_source='manual_admin'
+            WHERE machine_code=%s
+            RETURNING *
+        """, [data.device_name or code[:8], code], one=True, commit=True)
+    else:
+        row = add_bound_device(user_id, code, data.device_name or code[:8], "manual_admin")
     return {"ok": True, "device": row}
 
 @app.get("/admin/api/bound-devices")
@@ -760,8 +758,8 @@ def admin_delete_any_bound_device(machine_code: str, request: Request, key: Opti
     if not multi_user_enabled():
         raise HTTPException(status_code=400, detail="database disabled")
     db_query("DELETE FROM bound_devices WHERE machine_code=%s", [code], commit=True)
-    devices.pop(code, None); commands.pop(code, None); screenshots.pop(code, None); configs.pop(code, None); logs_store.pop(code, None)
-    return {"ok": True}
+    cleanup_runtime_device(code)
+    return {"ok": True, "removed": True}
 
 
 @app.get("/api/me")
@@ -892,28 +890,6 @@ def admin_generate_api_key(user_id: int, request: Request, key: Optional[str] = 
     prefix = raw[:16]
     row = db_query('''INSERT INTO api_keys(user_id,key_hash,key_prefix,key_plain) VALUES(%s,%s,%s,%s) RETURNING id,user_id,key_prefix,key_plain,status,created_at''', [user_id, api_key_hash(raw), prefix, raw], one=True, commit=True)
     return {"ok": True, "api_key": raw, "record": row}
-
-@app.get("/admin/api/bound-devices")
-def admin_bound_devices(request: Request, key: Optional[str] = None):
-    if not admin_auth_ok(request, key):
-        raise HTTPException(status_code=401, detail="bad admin key")
-    return api_bound_devices(request, key=key)
-
-@app.post("/admin/api/users/{user_id}/bound-devices")
-def admin_add_bound_device(user_id: int, data: BoundDeviceIn, request: Request, key: Optional[str] = None):
-    if not admin_auth_ok(request, key):
-        raise HTTPException(status_code=401, detail="bad admin key")
-    row = add_bound_device(user_id, data.machine_code, data.device_name or "", "manual_admin")
-    return {"ok": True, "device": row}
-
-@app.delete("/admin/api/bound-devices/{machine_code}")
-def admin_delete_bound_device(machine_code: str, request: Request, key: Optional[str] = None):
-    if not admin_auth_ok(request, key):
-        raise HTTPException(status_code=401, detail="bad admin key")
-    code = normalize_machine_code(machine_code)
-    db_query("DELETE FROM bound_devices WHERE machine_code=%s", [code], commit=True)
-    cleanup_runtime_device(code)
-    return {"ok": True, "removed": True}
 
 MOBILE_ADMIN_HTML = r"""
 <!doctype html>
@@ -2825,4 +2801,3 @@ def get_screenshot_image(machine_code: str, request: Request, key: Optional[str]
         raise HTTPException(status_code=500, detail="bad image")
     from fastapi.responses import Response
     return Response(content=img, media_type="image/jpeg")
-
