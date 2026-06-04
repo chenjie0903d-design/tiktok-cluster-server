@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.9")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.0")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -334,7 +334,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V5.9：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V6.0：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -399,7 +399,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.9-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v6.0-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -603,7 +603,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v5.9-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_9", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9"]}
+    return {"ok": True, "version": "v26-web-v6.0-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_0", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -895,7 +895,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V5.9</title>
+<title>TikTok 集群控制台 Web V6.0</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -1794,6 +1794,34 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+
+/* V6.0：绑定设备下拉框明确为“选择用户”，普通用户隐藏 */
+.bound-row select{
+  background:#f8fafc!important;
+  color:#111827!important;
+  font-weight:800!important;
+  text-align:center!important;
+}
+.bound-row select option{
+  color:#111827!important;
+}
+@media (max-width:899px){
+  body:not(.is-admin-mode) .bound-row{
+    grid-template-columns:1fr 76px!important;
+  }
+  body:not(.is-admin-mode) .bound-row select{
+    display:none!important;
+  }
+}
+@media (min-width:900px){
+  body:not(.is-admin-mode) .bound-row{
+    grid-template-columns:1fr 120px!important;
+  }
+  body:not(.is-admin-mode) .bound-row select{
+    display:none!important;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -1939,7 +1967,7 @@ body.sync-collapsed{padding-bottom:42px}
     <div class="bound-title">绑定设备机器码</div>
     <div class="bound-row">
       <input id="boundMachineInput" placeholder="请输入机器码，一次一个">
-      <select id="boundUserSelect" style="display:none"></select>
+      <select id="boundUserSelect" style="display:none"><option value="">选择用户</option></select>
       <button onclick="addBoundDevice()">添加</button>
     </div>
     <div id="boundList" class="bound-list"></div>
@@ -1975,6 +2003,7 @@ if (apiKeyFromUrl) localStorage.setItem("USER_API_KEY", apiKeyFromUrl);
 const ADMIN_KEY = keyFromUrl || localStorage.getItem("ADMIN_KEY") || "";
 const USER_API_KEY = apiKeyFromUrl || localStorage.getItem("USER_API_KEY") || "";
 const IS_ADMIN = !!ADMIN_KEY;
+if(IS_ADMIN){ document.body.classList.add("is-admin-mode"); }
 let DEVICES = [];
 let selected = new Set();
 
@@ -2265,6 +2294,9 @@ async function addBoundDevice(){
   const input = document.getElementById("boundMachineInput");
   const code = (input.value||"").trim();
   if(!code){ await centerAlert("请输入机器码"); return; }
+    const userSel = document.getElementById("boundUserSelect") || document.getElementById("bindUserSelect");
+    const user_id = userSel ? userSel.value : "";
+    if(IS_ADMIN && userSel && !user_id){ await centerAlert("请选择用户"); return; }
   const body = {machine_code: code};
   const sel = document.getElementById("boundUserSelect");
   if(IS_ADMIN && sel && sel.value) body.user_id = Number(sel.value);
@@ -2710,8 +2742,8 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
         <div class='tip'>管理员用 ADMIN_KEY；普通用户用 API 密钥。没有正确密码不会加载控制台。</div>
         </div>
         <script>
-        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=59'}
-        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=59'}
+        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=60'}
+        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=60'}
         </script></body></html>
         """, status_code=401)
 
