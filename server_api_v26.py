@@ -5,10 +5,15 @@ import time
 import uuid
 import os
 import base64
+import secrets
+import hmac
+import hashlib
+import re
 from datetime import datetime
 from fastapi.responses import HTMLResponse
+from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V4.8")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.0")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -20,6 +25,254 @@ daily_seq_map: Dict[str, int] = {}
 daily_seq_next = 1
 SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
+
+# ==================== V5.0 轻量多用户 / PostgreSQL ====================
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+API_KEY_PEPPER = os.environ.get("API_KEY_PEPPER", os.environ.get("ADMIN_KEY", "TikTokClusterPepper2026"))
+try:
+    import psycopg2
+    import psycopg2.extras
+except Exception:
+    psycopg2 = None
+
+
+def multi_user_enabled() -> bool:
+    return bool(DATABASE_URL and psycopg2 is not None)
+
+
+def db_conn():
+    if not multi_user_enabled():
+        raise RuntimeError("DATABASE_URL/psycopg2 unavailable")
+    return psycopg2.connect(DATABASE_URL)
+
+
+def db_query(sql, params=None, one=False, commit=False):
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params or [])
+            rows = []
+            if cur.description:
+                rows = cur.fetchall()
+            if commit:
+                conn.commit()
+            if one:
+                return dict(rows[0]) if rows else None
+            return [dict(r) for r in rows]
+
+
+def api_key_hash(key: str) -> str:
+    key = str(key or "").strip()
+    return hashlib.sha256((key + "|" + API_KEY_PEPPER).encode("utf-8")).hexdigest()
+
+
+def make_api_key() -> str:
+    return "tk_live_" + secrets.token_urlsafe(32).replace("-", "").replace("_", "")[:40]
+
+
+def normalize_machine_code(machine_code: str) -> str:
+    code = str(machine_code or "").strip()
+    code = re.sub(r"[^A-Za-z0-9_\-]", "", code)
+    return code[:128]
+
+
+def init_db():
+    if not multi_user_enabled():
+        print("[multi-user] DATABASE_URL missing or psycopg2 unavailable; legacy memory mode")
+        return False
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                status TEXT NOT NULL DEFAULT 'active',
+                expires_at TIMESTAMPTZ NULL,
+                max_devices INTEGER NOT NULL DEFAULT 3,
+                bind_mode TEXT NOT NULL DEFAULT 'whitelist',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            ''')
+            cur.execute('''
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                key_hash TEXT UNIQUE NOT NULL,
+                key_prefix TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                expires_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_used_at TIMESTAMPTZ NULL
+            );
+            ''')
+            cur.execute('''
+            CREATE TABLE IF NOT EXISTS bound_devices (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                machine_code TEXT UNIQUE NOT NULL,
+                device_name TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active',
+                bound_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_seen TIMESTAMPTZ NULL,
+                client_version TEXT DEFAULT '',
+                note TEXT DEFAULT '',
+                bind_source TEXT NOT NULL DEFAULT 'manual_user'
+            );
+            ''')
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_bound_devices_user_id ON bound_devices(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);")
+            conn.commit()
+    print("[multi-user] PostgreSQL tables ready")
+    return True
+
+try:
+    init_db()
+except Exception as e:
+    print("[multi-user] init_db failed:", repr(e))
+
+
+def extract_bearer(request: Request, api_key: Optional[str] = None):
+    if api_key:
+        return str(api_key).strip()
+    auth = request.headers.get("Authorization", "") if request else ""
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return ""
+
+
+def admin_auth_ok(request: Request, key: Optional[str] = None):
+    expected = os.environ.get("ADMIN_KEY", "").strip()
+    if not expected:
+        return True
+    provided = (key or request.headers.get("X-Admin-Key") or "").strip()
+    return hmac.compare_digest(provided, expected)
+
+
+def get_user_by_api_key(raw_key: str):
+    if not multi_user_enabled() or not raw_key:
+        return None
+    kh = api_key_hash(raw_key)
+    row = db_query('''
+        SELECT ak.id AS api_key_id, ak.user_id, ak.status AS key_status, ak.expires_at AS key_expires_at,
+               u.username, u.role, u.status AS user_status, u.expires_at AS user_expires_at,
+               u.max_devices, u.bind_mode
+        FROM api_keys ak
+        JOIN users u ON u.id = ak.user_id
+        WHERE ak.key_hash=%s
+    ''', [kh], one=True)
+    if not row:
+        return None
+    db_query("UPDATE api_keys SET last_used_at=NOW() WHERE id=%s", [row["api_key_id"]], commit=True)
+    return row
+
+
+def check_user_active(row):
+    if not row:
+        raise HTTPException(status_code=401, detail="api_key invalid")
+    if row.get("key_status") != "active":
+        raise HTTPException(status_code=403, detail="api_key disabled")
+    if row.get("user_status") != "active":
+        raise HTTPException(status_code=403, detail="user disabled")
+    if row.get("key_expires_at"):
+        # PostgreSQL handles timezone-aware datetime; compare in SQL for reliability.
+        expired = db_query("SELECT NOW() > %s AS expired", [row.get("key_expires_at")], one=True)
+        if expired and expired.get("expired"):
+            raise HTTPException(status_code=403, detail="api_key expired")
+    if row.get("user_expires_at"):
+        expired = db_query("SELECT NOW() > %s AS expired", [row.get("user_expires_at")], one=True)
+        if expired and expired.get("expired"):
+            raise HTTPException(status_code=403, detail="user expired")
+    return row
+
+
+def get_auth_context(request: Request, key: Optional[str] = None, api_key: Optional[str] = None, allow_legacy=True):
+    if admin_auth_ok(request, key):
+        return {"is_admin": True, "user_id": None, "username": "ADMIN", "role": "admin"}
+    raw_key = extract_bearer(request, api_key)
+    if raw_key and multi_user_enabled():
+        row = check_user_active(get_user_by_api_key(raw_key))
+        return {"is_admin": False, "user_id": int(row["user_id"]), "username": row["username"], "role": row.get("role") or "user", "user": row}
+    if allow_legacy and not multi_user_enabled():
+        return {"is_admin": True, "user_id": None, "username": "LEGACY", "role": "admin"}
+    raise HTTPException(status_code=401, detail="bad admin key or api_key")
+
+
+def get_bound_device(machine_code: str):
+    if not multi_user_enabled():
+        return None
+    return db_query('''
+        SELECT bd.*, u.username
+        FROM bound_devices bd
+        JOIN users u ON u.id=bd.user_id
+        WHERE bd.machine_code=%s
+    ''', [machine_code], one=True)
+
+
+def verify_device_access(request: Request, machine_code: str, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
+    if ctx["is_admin"] or not multi_user_enabled():
+        return ctx
+    code = normalize_machine_code(machine_code)
+    bd = get_bound_device(code)
+    if not bd:
+        raise HTTPException(status_code=403, detail="device not bound")
+    if int(bd["user_id"]) != int(ctx["user_id"]):
+        raise HTTPException(status_code=403, detail="device bound to another user")
+    if bd.get("status") != "active":
+        raise HTTPException(status_code=403, detail="device disabled")
+    return ctx
+
+
+def count_user_devices(user_id: int):
+    row = db_query("SELECT COUNT(*) AS c FROM bound_devices WHERE user_id=%s", [user_id], one=True)
+    return int(row.get("c", 0) if row else 0)
+
+
+def add_bound_device(user_id: int, machine_code: str, device_name: str = "", bind_source: str = "manual_user"):
+    code = normalize_machine_code(machine_code)
+    if len(code) < 4:
+        raise HTTPException(status_code=400, detail="machine_code invalid")
+    user = db_query("SELECT * FROM users WHERE id=%s", [user_id], one=True)
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+    if user.get("status") != "active":
+        raise HTTPException(status_code=403, detail="user disabled")
+    existing = get_bound_device(code)
+    if existing:
+        if int(existing["user_id"]) == int(user_id):
+            return existing
+        raise HTTPException(status_code=409, detail="machine_code bound to another user")
+    max_devices = int(user.get("max_devices") or 0)
+    if max_devices > 0 and count_user_devices(user_id) >= max_devices:
+        raise HTTPException(status_code=403, detail="device limit reached")
+    return db_query('''
+        INSERT INTO bound_devices(user_id, machine_code, device_name, bind_source)
+        VALUES(%s,%s,%s,%s)
+        RETURNING *
+    ''', [user_id, code, str(device_name or "").strip(), bind_source], one=True, commit=True)
+
+
+def cleanup_runtime_device(machine_code: str):
+    devices.pop(machine_code, None)
+    commands.pop(machine_code, None)
+    screenshots.pop(machine_code, None)
+    configs.pop(machine_code, None)
+    logs_store.pop(machine_code, None)
+    try:
+        daily_seq_map.pop(machine_code, None)
+    except Exception:
+        pass
+    try:
+        safe_code = "".join(c for c in machine_code if c.isalnum() or c in ("-", "_"))[:80]
+        for fn in os.listdir(SCREENSHOT_DIR):
+            if fn.startswith(safe_code):
+                try: os.remove(os.path.join(SCREENSHOT_DIR, fn))
+                except Exception: pass
+    except Exception:
+        pass
+
 
 class Heartbeat(BaseModel):
     machine_code: str
@@ -48,11 +301,31 @@ class ConfigIn(BaseModel):
 class LogIn(BaseModel):
     text: str
 
+class UserCreateIn(BaseModel):
+    username: str
+    max_devices: int = 3
+    expires_at: Optional[str] = None
+
+class UserUpdateIn(BaseModel):
+    username: Optional[str] = None
+    status: Optional[str] = None
+    expires_at: Optional[str] = None
+    max_devices: Optional[int] = None
+    bind_mode: Optional[str] = None
+
+class BoundDeviceIn(BaseModel):
+    machine_code: str
+    device_name: Optional[str] = ""
+    user_id: Optional[int] = None
+
+class StatusIn(BaseModel):
+    status: str
+
 
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V4.8：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V5.0：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -114,31 +387,51 @@ def assign_daily_seq(machine_code: str) -> int:
 
     return daily_seq_map[machine_code]
 
+
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v2.1 is running", "admin": "/admin"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.0-multi-user"}
 
 @app.post("/api/heartbeat")
-def heartbeat(data: Heartbeat):
+def heartbeat(data: Heartbeat, request: Request):
     now = time.time()
-    old = devices.get(data.machine_code, {})
+    machine_code = normalize_machine_code(data.machine_code)
+    if not machine_code:
+        raise HTTPException(status_code=400, detail="machine_code invalid")
 
+    user_id = None
+    username = ""
+    if multi_user_enabled():
+        raw_key = extract_bearer(request)
+        user_row = check_user_active(get_user_by_api_key(raw_key))
+        user_id = int(user_row["user_id"])
+        username = user_row["username"]
+        bd = get_bound_device(machine_code)
+        if not bd:
+            # 当前版本默认白名单模式：必须先绑定机器码。
+            raise HTTPException(status_code=403, detail="device not bound")
+        if int(bd["user_id"]) != user_id:
+            raise HTTPException(status_code=403, detail="device bound to another user")
+        if bd.get("status") != "active":
+            raise HTTPException(status_code=403, detail="device disabled")
+        db_query('''
+            UPDATE bound_devices SET last_seen=NOW(), device_name=COALESCE(NULLIF(%s,''), device_name), client_version=%s
+            WHERE machine_code=%s
+        ''', [str(data.device_name or "").strip(), data.app_version, machine_code], commit=True)
+
+    old = devices.get(machine_code, {})
     location_carrier = data.location_carrier
     if not location_carrier:
         location_carrier = f"{data.location or ''}{data.carrier or ''}".strip()
-
-    daily_seq = assign_daily_seq(data.machine_code)
-
-    devices[data.machine_code] = {
+    daily_seq = assign_daily_seq(machine_code)
+    devices[machine_code] = {
         **old,
+        "user_id": user_id,
+        "username": username,
         "daily_seq": daily_seq,
         "daily_seq_date": daily_seq_date,
-        "machine_code": data.machine_code,
-        "device_name": (
-            old.get("device_name", "")
-            if str(data.device_name or "").strip() in ("", "1", "未知设备", "未识别设备名") and old.get("device_name")
-            else data.device_name
-        ),
+        "machine_code": machine_code,
+        "device_name": (old.get("device_name", "") if str(data.device_name or "").strip() in ("", "1", "未知设备", "未识别设备名") and old.get("device_name") else data.device_name),
         "status": data.status,
         "running": data.running,
         "work_time": data.work_time,
@@ -149,134 +442,132 @@ def heartbeat(data: Heartbeat):
         "app_version": data.app_version,
         "last_seen": now,
     }
-    commands.setdefault(data.machine_code, [])
+    commands.setdefault(machine_code, [])
     return {"ok": True, "server_time": now}
 
+
+def build_device_item(d: dict, now: float):
+    item = dict(d)
+    item["online"] = now - item.get("last_seen", 0) <= 120 if item.get("last_seen") else False
+    item["last_seen_ago"] = int(now - item.get("last_seen", 0)) if item.get("last_seen") else 999999
+    if not item["online"]:
+        item["running"] = False
+    if not item["online"]:
+        item["display_state"] = "offline"
+    elif item.get("status") == "switching_ip":
+        item["display_state"] = "switching_ip"
+    elif item.get("status") == "screenshotting":
+        item["display_state"] = "online" if screenshots.get(item.get("machine_code")) else "screenshotting"
+    elif item.get("status") == "updating_package":
+        item["display_state"] = "updating_package"
+    elif item.get("status") in ("starting_app", "restarting_app"):
+        item["display_state"] = "online"
+    else:
+        item["display_state"] = "online"
+    shot = screenshots.get(item.get("machine_code"))
+    item["has_screenshot"] = bool(shot)
+    item["screenshot_time"] = shot.get("created_at") if shot else None
+    item["work_time"] = get_device_work_time(item.get("machine_code"), item)
+    return item
+
 @app.get("/api/devices")
-def list_devices():
+def list_devices(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
     now = time.time()
     result = []
-    for d in devices.values():
-        item = dict(d)
-        item["online"] = now - item.get("last_seen", 0) <= 120
-        item["last_seen_ago"] = int(now - item.get("last_seen", 0))
-        if not item["online"]:
-            item["running"] = False
-        if not item["online"]:
-            item["display_state"] = "offline"
-        elif item.get("status") == "switching_ip":
-            item["display_state"] = "switching_ip"
-        elif item.get("status") == "screenshotting":
-            # V36：如果已经收到截图，就不要一直显示截图中
-            item["display_state"] = "online" if screenshots.get(item.get("machine_code")) else "screenshotting"
-        elif item.get("status") == "updating_package":
-            item["display_state"] = "updating_package"
-        elif item.get("status") in ("starting_app", "restarting_app"):
-            item["display_state"] = "online"
-        else:
-            item["display_state"] = "online"
-        shot = screenshots.get(item.get("machine_code"))
-        item["has_screenshot"] = bool(shot)
-        item["screenshot_time"] = shot.get("created_at") if shot else None
-        item["work_time"] = get_device_work_time(item.get("machine_code"), item)
+    seen = set()
+    for machine_code, d in devices.items():
+        if multi_user_enabled() and not ctx["is_admin"] and int(d.get("user_id") or -1) != int(ctx["user_id"]):
+            continue
+        item = build_device_item(d, now)
         result.append(item)
-    result.sort(
-        key=lambda x: (
-            x.get("daily_seq", 999999),
-            not x.get("online", False),
-            x.get("device_name", "")
-        )
-    )
-    return {"ok": True, "devices": result}
+        seen.add(machine_code)
+    if multi_user_enabled():
+        if ctx["is_admin"]:
+            rows = db_query('''SELECT bd.*, u.username FROM bound_devices bd JOIN users u ON u.id=bd.user_id ORDER BY bd.bound_at DESC''')
+        else:
+            rows = db_query('''SELECT bd.*, u.username FROM bound_devices bd JOIN users u ON u.id=bd.user_id WHERE bd.user_id=%s ORDER BY bd.bound_at DESC''', [ctx["user_id"]])
+        for bd in rows:
+            code = bd["machine_code"]
+            if code in seen:
+                continue
+            item = {
+                "user_id": bd["user_id"], "username": bd.get("username", ""),
+                "machine_code": code,
+                "device_name": bd.get("device_name") or code[:8],
+                "status": "disabled" if bd.get("status") == "disabled" else "offline",
+                "running": False,
+                "last_seen": 0,
+                "app_version": bd.get("client_version") or "",
+                "public_ip": "", "location":"", "carrier":"", "location_carrier":"",
+                "daily_seq": 999999,
+            }
+            result.append(build_device_item(item, now))
+    result.sort(key=lambda x: (not x.get("online", False), x.get("daily_seq", 999999), str(x.get("username") or ""), str(x.get("device_name") or "")))
+    return {"ok": True, "devices": result, "is_admin": ctx["is_admin"], "username": ctx.get("username")}
 
 @app.post("/api/devices/{machine_code}/command")
-def send_command(machine_code: str, cmd: CommandIn):
+def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    machine_code = normalize_machine_code(machine_code)
+    verify_device_access(request, machine_code, key, api_key)
     if machine_code not in devices:
+        # 允许给已绑定但当前离线的设备排队？为了避免无效堆积，保持旧逻辑：必须已心跳出现。
         raise HTTPException(status_code=404, detail="device not found")
-    item = {
-        "id": str(uuid.uuid4()),
-        "command": cmd.command,
-        "value": cmd.value,
-        "created_at": time.time(),
-    }
+    item = {"id": str(uuid.uuid4()), "command": cmd.command, "value": cmd.value, "created_at": time.time()}
     commands.setdefault(machine_code, []).append(item)
-
-    # V26：远程改名命令下发时，服务端先把列表里的设备名改掉；
-    # 后续如果客户端心跳误传“1”，heartbeat 也会保留这个有效名称。
     if str(cmd.command).strip() == "rename" and cmd.value:
         devices[machine_code]["device_name"] = str(cmd.value).strip()
-
+        if multi_user_enabled():
+            db_query("UPDATE bound_devices SET device_name=%s WHERE machine_code=%s", [str(cmd.value).strip(), machine_code], commit=True)
     return {"ok": True, "queued": item}
 
 @app.post("/api/commands/all")
-def send_all(cmd: CommandIn):
-    # V26：全部按钮只下发给在线客户端；离线设备保留显示，但不下发命令
+def send_all(cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
+        if multi_user_enabled() and not ctx["is_admin"] and int(d.get("user_id") or -1) != int(ctx["user_id"]):
+            continue
         if now - d.get("last_seen", 0) > 120:
             continue
-        item = {
-            "id": str(uuid.uuid4()),
-            "command": cmd.command,
-            "value": cmd.value,
-            "created_at": time.time(),
-        }
+        item = {"id": str(uuid.uuid4()), "command": cmd.command, "value": cmd.value, "created_at": time.time()}
         commands.setdefault(machine_code, []).append(item)
         count += 1
     return {"ok": True, "count": count}
 
 @app.get("/api/devices/{machine_code}/commands")
-def pull_commands(machine_code: str):
+def pull_commands(machine_code: str, request: Request):
+    machine_code = normalize_machine_code(machine_code)
+    if multi_user_enabled():
+        verify_device_access(request, machine_code, None, None)
     pending = commands.get(machine_code, [])
     commands[machine_code] = []
     return {"ok": True, "commands": pending}
 
 @app.post("/api/devices/{machine_code}/screenshot")
-def upload_screenshot(machine_code: str, shot: ScreenshotIn):
+def upload_screenshot(machine_code: str, shot: ScreenshotIn, request: Request):
+    machine_code = normalize_machine_code(machine_code)
+    if multi_user_enabled():
+        ctx = verify_device_access(request, machine_code)
+    else:
+        ctx = {"user_id": None}
     if machine_code not in devices:
-        devices[machine_code] = {
-            "machine_code": machine_code,
-            "device_name": machine_code[:8],
-            "status": "online",
-            "running": False,
-            "last_seen": time.time(),
-        }
-
-    # V10：截图除了保存在内存供控制台显示，也保存到服务端 screenshots 文件夹。
+        devices[machine_code] = {"machine_code": machine_code, "device_name": machine_code[:8], "status": "online", "running": False, "last_seen": time.time(), "user_id": ctx.get("user_id")}
     safe_code = "".join(c for c in machine_code if c.isalnum() or c in ("-", "_"))[:80]
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{safe_code}_{ts}.jpg"
-    filepath = os.path.join(SCREENSHOT_DIR, filename)
-
+    if multi_user_enabled() and ctx.get("user_id"):
+        user_dir = os.path.join(SCREENSHOT_DIR, f"user_{ctx['user_id']}")
+        os.makedirs(user_dir, exist_ok=True)
+        filepath = os.path.join(user_dir, f"{safe_code}.jpg")
+    else:
+        filepath = os.path.join(SCREENSHOT_DIR, f"{safe_code}.jpg")
+    filename = os.path.basename(filepath)
     try:
         with open(filepath, "wb") as f:
             f.write(base64.b64decode(shot.image_base64))
     except Exception:
         filepath = ""
-
-    screenshots[machine_code] = {
-        "machine_code": machine_code,
-        "image_base64": shot.image_base64,
-        "width": shot.width,
-        "height": shot.height,
-        "created_at": time.time(),
-        "filename": filename if filepath else "",
-        "filepath": filepath,
-    }
-    # V32：截图上传成功后恢复在线状态，避免控制台一直显示“截图中”
-    try:
-        devices[machine_code]["status"] = "online"
-        devices[machine_code]["last_seen"] = time.time()
-    except Exception:
-        pass
-    # V33：截图上传成功后恢复状态，避免控制台一直显示“截图中”
-    try:
-        devices[machine_code]["status"] = "online"
-        devices[machine_code]["last_seen"] = time.time()
-    except Exception:
-        pass
-    # V36：截图上传成功后恢复 online
+    screenshots[machine_code] = {"machine_code": machine_code, "image_base64": shot.image_base64, "width": shot.width, "height": shot.height, "created_at": time.time(), "filename": filename if filepath else "", "filepath": filepath}
     try:
         devices[machine_code]["status"] = "online"
         devices[machine_code]["last_seen"] = time.time()
@@ -285,99 +576,204 @@ def upload_screenshot(machine_code: str, shot: ScreenshotIn):
     return {"ok": True, "filename": filename if filepath else "", "filepath": filepath}
 
 @app.get("/api/devices/{machine_code}/screenshot")
-def get_screenshot(machine_code: str):
+def get_screenshot(machine_code: str, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    machine_code = normalize_machine_code(machine_code)
+    verify_device_access(request, machine_code, key, api_key)
     shot = screenshots.get(machine_code)
     if not shot:
         raise HTTPException(status_code=404, detail="screenshot not found")
     return {"ok": True, "screenshot": shot}
 
-
-
 @app.delete("/api/devices/{machine_code}")
-def delete_device(machine_code: str):
-    """V32：删除客户端记录、待执行命令、截图、配置和日志缓存。"""
+def delete_device(machine_code: str, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    machine_code = normalize_machine_code(machine_code)
+    verify_device_access(request, machine_code, key, api_key)
     removed = machine_code in devices
-    devices.pop(machine_code, None)
-    commands.pop(machine_code, None)
-    screenshots.pop(machine_code, None)
-    configs.pop(machine_code, None)
-    logs_store.pop(machine_code, None)
-    try:
-        global daily_seq_map
-        daily_seq_map.pop(machine_code, None)
-    except Exception:
-        pass
+    cleanup_runtime_device(machine_code)
     return {"ok": True, "removed": removed, "machine_code": machine_code}
-
 
 @app.get("/api/version")
 def version():
-    return {
-        "ok": True,
-        "version": "v26-web-v4.8",
-        "features": ["heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_upload", "screenshot_file_save", "online_timeout_120s", "mobile_admin_v4_8"]
-    }
+    return {"ok": True, "version": "v26-web-v5.0-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_0"]}
 
 @app.get("/api/debug/devices")
-def debug_devices():
+def debug_devices(request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
     return {"ok": True, "devices": devices, "screenshots": list(screenshots.keys())}
 
-
 @app.post("/api/devices/{machine_code}/config")
-def set_device_config(machine_code: str, data: ConfigIn):
+def set_device_config(machine_code: str, data: ConfigIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    machine_code = normalize_machine_code(machine_code)
+    verify_device_access(request, machine_code, key, api_key)
     if machine_code not in devices:
         raise HTTPException(status_code=404, detail="device not found")
-    configs[machine_code] = {
-        "config": data.config,
-        "updated_at": time.time(),
-    }
-    item = {
-        "id": str(uuid.uuid4()),
-        "command": "update_config",
-        "value": data.config,
-        "created_at": time.time(),
-    }
+    configs[machine_code] = {"config": data.config, "updated_at": time.time()}
+    item = {"id": str(uuid.uuid4()), "command": "update_config", "value": data.config, "created_at": time.time()}
     commands.setdefault(machine_code, []).append(item)
     return {"ok": True, "config": data.config}
 
 @app.post("/api/config/all")
-def set_all_config(data: ConfigIn):
-    # V26：全部同步配置只同步在线客户端
+def set_all_config(data: ConfigIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
+        if multi_user_enabled() and not ctx["is_admin"] and int(d.get("user_id") or -1) != int(ctx["user_id"]):
+            continue
         if now - d.get("last_seen", 0) > 120:
             continue
-        configs[machine_code] = {
-            "config": data.config,
-            "updated_at": time.time(),
-        }
-        item = {
-            "id": str(uuid.uuid4()),
-            "command": "update_config",
-            "value": data.config,
-            "created_at": time.time(),
-        }
+        configs[machine_code] = {"config": data.config, "updated_at": time.time()}
+        item = {"id": str(uuid.uuid4()), "command": "update_config", "value": data.config, "created_at": time.time()}
         commands.setdefault(machine_code, []).append(item)
         count += 1
     return {"ok": True, "count": count}
 
 @app.post("/api/devices/{machine_code}/log")
-def upload_log(machine_code: str, data: LogIn):
-    logs_store[machine_code] = {
-        "machine_code": machine_code,
-        "text": data.text or "",
-        "created_at": time.time(),
-    }
+def upload_log(machine_code: str, data: LogIn, request: Request):
+    machine_code = normalize_machine_code(machine_code)
+    if multi_user_enabled():
+        verify_device_access(request, machine_code)
+    logs_store[machine_code] = {"machine_code": machine_code, "text": data.text or "", "created_at": time.time()}
     return {"ok": True}
 
 @app.get("/api/devices/{machine_code}/log")
-def get_log(machine_code: str):
+def get_log(machine_code: str, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    machine_code = normalize_machine_code(machine_code)
+    verify_device_access(request, machine_code, key, api_key)
     log = logs_store.get(machine_code)
     if not log:
         raise HTTPException(status_code=404, detail="log not found")
     return {"ok": True, "log": log}
 
+# ==================== V5.0 用户/密钥/绑定设备接口 ====================
+@app.get("/api/me")
+def api_me(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
+    return {"ok": True, "is_admin": ctx["is_admin"], "user_id": ctx.get("user_id"), "username": ctx.get("username")}
+
+@app.get("/api/bound-devices")
+def api_bound_devices(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
+    if not multi_user_enabled():
+        return {"ok": True, "devices": []}
+    if ctx["is_admin"]:
+        rows = db_query('''SELECT bd.*, u.username FROM bound_devices bd JOIN users u ON u.id=bd.user_id ORDER BY bd.bound_at DESC''')
+    else:
+        rows = db_query('''SELECT bd.*, u.username FROM bound_devices bd JOIN users u ON u.id=bd.user_id WHERE bd.user_id=%s ORDER BY bd.bound_at DESC''', [ctx["user_id"]])
+    for r in rows:
+        rt = devices.get(r["machine_code"], {})
+        r["online"] = bool(rt and time.time() - rt.get("last_seen", 0) <= 120)
+        r["running"] = bool(rt.get("running")) if rt else False
+    return {"ok": True, "devices": rows, "is_admin": ctx["is_admin"]}
+
+@app.post("/api/bound-devices")
+def api_add_bound_device(data: BoundDeviceIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    user_id = int(data.user_id) if ctx["is_admin"] and data.user_id else int(ctx["user_id"])
+    row = add_bound_device(user_id, data.machine_code, data.device_name or "", "manual_admin" if ctx["is_admin"] else "manual_user")
+    return {"ok": True, "device": row}
+
+@app.delete("/api/bound-devices/{machine_code}")
+def api_delete_bound_device(machine_code: str, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
+    code = normalize_machine_code(machine_code)
+    bd = get_bound_device(code)
+    if not bd:
+        return {"ok": True, "removed": False}
+    if not ctx["is_admin"] and int(bd["user_id"]) != int(ctx["user_id"]):
+        raise HTTPException(status_code=403, detail="forbidden")
+    db_query("DELETE FROM bound_devices WHERE machine_code=%s", [code], commit=True)
+    cleanup_runtime_device(code)
+    return {"ok": True, "removed": True}
+
+@app.get("/admin/api/users")
+def admin_list_users(request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        return {"ok": True, "users": []}
+    rows = db_query('''
+        SELECT u.*, COALESCE(d.c,0) AS device_count, COALESCE(k.c,0) AS key_count
+        FROM users u
+        LEFT JOIN (SELECT user_id, COUNT(*) c FROM bound_devices GROUP BY user_id) d ON d.user_id=u.id
+        LEFT JOIN (SELECT user_id, COUNT(*) c FROM api_keys GROUP BY user_id) k ON k.user_id=u.id
+        ORDER BY u.id DESC
+    ''')
+    return {"ok": True, "users": rows}
+
+@app.post("/admin/api/users")
+def admin_create_user(data: UserCreateIn, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    username = str(data.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="username required")
+    row = db_query('''
+        INSERT INTO users(username, max_devices, expires_at, bind_mode)
+        VALUES(%s,%s,NULLIF(%s,'')::timestamptz,'whitelist') RETURNING *
+    ''', [username, int(data.max_devices or 3), data.expires_at or ""], one=True, commit=True)
+    return {"ok": True, "user": row}
+
+@app.patch("/admin/api/users/{user_id}")
+def admin_update_user(user_id: int, data: UserUpdateIn, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    fields=[]; params=[]
+    for col in ("username", "status", "bind_mode"):
+        val = getattr(data, col)
+        if val is not None:
+            fields.append(f"{col}=%s"); params.append(val)
+    if data.max_devices is not None:
+        fields.append("max_devices=%s"); params.append(int(data.max_devices))
+    if data.expires_at is not None:
+        fields.append("expires_at=NULLIF(%s,'')::timestamptz"); params.append(data.expires_at)
+    if not fields:
+        return {"ok": True}
+    fields.append("updated_at=NOW()")
+    params.append(user_id)
+    row = db_query(f"UPDATE users SET {', '.join(fields)} WHERE id=%s RETURNING *", params, one=True, commit=True)
+    return {"ok": True, "user": row}
+
+@app.post("/admin/api/users/{user_id}/api-key")
+def admin_generate_api_key(user_id: int, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    user = db_query("SELECT * FROM users WHERE id=%s", [user_id], one=True)
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+    raw = make_api_key()
+    prefix = raw[:16]
+    row = db_query('''INSERT INTO api_keys(user_id,key_hash,key_prefix) VALUES(%s,%s,%s) RETURNING id,user_id,key_prefix,status,created_at''', [user_id, api_key_hash(raw), prefix], one=True, commit=True)
+    return {"ok": True, "api_key": raw, "record": row}
+
+@app.get("/admin/api/bound-devices")
+def admin_bound_devices(request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    return api_bound_devices(request, key=key)
+
+@app.post("/admin/api/users/{user_id}/bound-devices")
+def admin_add_bound_device(user_id: int, data: BoundDeviceIn, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    row = add_bound_device(user_id, data.machine_code, data.device_name or "", "manual_admin")
+    return {"ok": True, "device": row}
+
+@app.delete("/admin/api/bound-devices/{machine_code}")
+def admin_delete_bound_device(machine_code: str, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    code = normalize_machine_code(machine_code)
+    db_query("DELETE FROM bound_devices WHERE machine_code=%s", [code], commit=True)
+    cleanup_runtime_device(code)
+    return {"ok": True, "removed": True}
 
 MOBILE_ADMIN_HTML = r"""
 <!doctype html>
@@ -385,7 +781,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V4.8</title>
+<title>TikTok 集群控制台 Web V5.0</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -1030,6 +1426,20 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+
+/* V5.0 多用户绑定/用户管理 */
+.bind-btn,.user-btn{margin-left:0!important;background:#e8f3ff!important;color:#1d9bf0!important}
+.bound-modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:140;padding:14px}
+.bound-modal.show{display:flex}
+.bound-box{width:min(760px,96vw);max-height:88vh;overflow:auto;background:#fff;border-radius:16px;padding:16px;box-shadow:0 12px 36px rgba(15,23,42,.25)}
+.bound-title{font-size:20px;font-weight:900;margin-bottom:10px;color:#111827}
+.bound-row{display:grid;grid-template-columns:1fr 100px 100px;gap:8px;margin-bottom:10px}
+.bound-row input,.bound-row select{border:1px solid #d0d5dd;border-radius:10px;padding:10px;font-size:15px;min-width:0}
+.bound-row button,.bound-list button,.user-actions button{border:0;border-radius:10px;padding:10px;font-weight:900;background:#1d9bf0;color:#fff}
+.bound-list{display:grid;gap:8px}.bound-item{border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:14px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.bound-item .meta{color:#667085;font-size:12px;margin-top:3px}.bound-item button{background:#ff4d4f}.bound-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.bound-actions button{border:0;border-radius:10px;padding:11px;font-weight:900}.bound-cancel{background:#e5e7eb;color:#111827}.bound-save{background:#1db954;color:#fff}
+.user-panel{display:grid;gap:10px}.user-create{display:grid;grid-template-columns:1fr 90px 130px 90px;gap:8px}.user-create input{border:1px solid #d0d5dd;border-radius:10px;padding:10px}.user-item{border:1px solid #e5e7eb;border-radius:10px;padding:10px}.key-once{background:#fff4e5;color:#b54708;padding:8px;border-radius:8px;margin-top:6px;word-break:break-all;font-weight:900}
+@media (max-width:899px){.header-right-tools{gap:5px!important}.bound-row{grid-template-columns:1fr 70px 70px}.user-btn{display:none!important}.bind-btn,.refresh-btn,.mobile-header-toggle{padding-left:8px!important;padding-right:8px!important}.user-create{grid-template-columns:1fr 65px 110px}.user-create button{grid-column:1/-1}}
+
 </style>
 </head>
 <body>
@@ -1045,7 +1455,7 @@ body.sync-collapsed{padding-bottom:42px}
         <label><span class="offline-over-text">离线超过</span> <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
       </div>
       <button class="mobile-header-toggle mobile-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
-      <button class="refresh-btn" onclick="loadDevices()">刷新</button>
+      <button class="refresh-btn bind-btn" onclick="openBoundModal()">绑定设备</button><button class="refresh-btn user-btn" id="userManageBtn" onclick="openUserModal()">用户管理</button><button class="refresh-btn" onclick="loadDevices()">刷新</button>
     </div>
   </div>
 </div>
@@ -1156,6 +1566,33 @@ body.sync-collapsed{padding-bottom:42px}
   </div>
 </div>
 
+
+<div id="boundModal" class="bound-modal" onclick="closeBoundModal()">
+  <div class="bound-box" onclick="event.stopPropagation()">
+    <div class="bound-title">绑定设备机器码</div>
+    <div class="bound-row">
+      <input id="boundMachineInput" placeholder="请输入机器码，一次一个">
+      <select id="boundUserSelect" style="display:none"></select>
+      <button onclick="addBoundDevice()">添加</button>
+    </div>
+    <div id="boundList" class="bound-list"></div>
+    <div class="bound-actions"><button class="bound-cancel" onclick="closeBoundModal()">取消</button><button class="bound-save" onclick="closeBoundModal()">保存</button></div>
+  </div>
+</div>
+<div id="userModal" class="bound-modal" onclick="closeUserModal()">
+  <div class="bound-box" onclick="event.stopPropagation()">
+    <div class="bound-title">用户管理</div>
+    <div class="user-create">
+      <input id="newUsername" placeholder="用户名">
+      <input id="newMaxDevices" type="number" value="3" placeholder="设备数">
+      <input id="newExpires" placeholder="到期时间，可空">
+      <button onclick="createUser()">创建用户</button>
+    </div>
+    <div id="userList" class="user-panel"></div>
+    <div class="bound-actions"><button class="bound-cancel" onclick="closeUserModal()">关闭</button><button class="bound-save" onclick="loadUsers()">刷新</button></div>
+  </div>
+</div>
+
 <div id="imgModal" class="modal" onclick="closeModal()">
   <button class="close" onclick="closeModal()">×</button>
   <img id="modalImg">
@@ -1165,8 +1602,12 @@ body.sync-collapsed{padding-bottom:42px}
 const SERVER = location.origin;
 const params = new URLSearchParams(location.search);
 const keyFromUrl = params.get("key") || "";
+const apiKeyFromUrl = params.get("api_key") || "";
 if (keyFromUrl) localStorage.setItem("ADMIN_KEY", keyFromUrl);
+if (apiKeyFromUrl) localStorage.setItem("USER_API_KEY", apiKeyFromUrl);
 const ADMIN_KEY = keyFromUrl || localStorage.getItem("ADMIN_KEY") || "";
+const USER_API_KEY = apiKeyFromUrl || localStorage.getItem("USER_API_KEY") || "";
+const IS_ADMIN = !!ADMIN_KEY;
 let DEVICES = [];
 let selected = new Set();
 
@@ -1287,7 +1728,10 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
 
 function headers(){
-  return {"Content-Type":"application/json","X-Admin-Key":ADMIN_KEY};
+  const h = {"Content-Type":"application/json"};
+  if(ADMIN_KEY) h["X-Admin-Key"] = ADMIN_KEY;
+  if(USER_API_KEY) h["Authorization"] = "Bearer " + USER_API_KEY;
+  return h;
 }
 async function api(path, opts={}){
   opts.headers = Object.assign(headers(), opts.headers || {});
@@ -1366,7 +1810,7 @@ function render(){
     const checked = selected.has(code) ? "checked" : "";
     const loc = d.location_carrier || `${d.location||""}${d.carrier||""}` || "-";
     const bad = isBadCarrier(d);
-    const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${d.screenshot_time||0}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
+    const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?${ADMIN_KEY ? 'key='+encodeURIComponent(ADMIN_KEY) : 'api_key='+encodeURIComponent(USER_API_KEY)}&t=${d.screenshot_time||0}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
     card.innerHTML = `
       <div class="seq">${seq}</div>
       <div class="dev-head">
@@ -1416,6 +1860,96 @@ function selectOnline(){
   render();
 }
 function clearSelected(){ selected.clear(); render(); }
+
+function fmtTime(v){ if(!v) return "-"; try{return new Date(v).toLocaleString()}catch(e){return String(v)} }
+async function ensureUsersForSelect(){
+  if(!IS_ADMIN) return [];
+  try{
+    const data = await api("/admin/api/users");
+    const users = data.users || [];
+    const sel = document.getElementById("boundUserSelect");
+    if(sel){
+      sel.style.display = "";
+      sel.innerHTML = users.map(u=>`<option value="${u.id}">${escapeHtml(u.username)}(${u.id})</option>`).join("");
+    }
+    return users;
+  }catch(e){return []}
+}
+async function openBoundModal(){
+  document.getElementById("boundModal").classList.add("show");
+  await ensureUsersForSelect();
+  await loadBoundDevices();
+}
+function closeBoundModal(){ document.getElementById("boundModal").classList.remove("show"); }
+async function loadBoundDevices(){
+  try{
+    const data = await api("/api/bound-devices");
+    const list = document.getElementById("boundList");
+    const rows = data.devices || [];
+    if(!rows.length){ list.innerHTML = `<div class="small">暂无绑定机器码</div>`; return; }
+    list.innerHTML = rows.map(r=>{
+      const status = r.status === "disabled" ? "禁用" : (r.online ? "在线" : "离线");
+      const user = IS_ADMIN ? `用户：${escapeHtml(r.username||r.user_id||"")}　` : "";
+      return `<div class="bound-item"><div><b>${escapeHtml(r.machine_code)}</b><div class="meta">${user}名称：${escapeHtml(r.device_name||"-")}　状态：${status}　绑定：${fmtTime(r.bound_at)}</div></div><button onclick="deleteBoundDevice('${r.machine_code}')">删除</button></div>`;
+    }).join("");
+  }catch(e){ await centerAlert("读取绑定设备失败："+e.message); }
+}
+async function addBoundDevice(){
+  const input = document.getElementById("boundMachineInput");
+  const code = (input.value||"").trim();
+  if(!code){ await centerAlert("请输入机器码"); return; }
+  const body = {machine_code: code};
+  const sel = document.getElementById("boundUserSelect");
+  if(IS_ADMIN && sel && sel.value) body.user_id = Number(sel.value);
+  try{
+    await api("/api/bound-devices", {method:"POST", body:JSON.stringify(body)});
+    input.value = "";
+    await loadBoundDevices();
+    await loadDevices();
+  }catch(e){ await centerAlert("添加失败："+e.message); }
+}
+async function deleteBoundDevice(code){
+  if(!await centerConfirm(`确定删除绑定机器码？\n${code}`)) return;
+  try{
+    await api(`/api/bound-devices/${encodeURIComponent(code)}`, {method:"DELETE"});
+    await loadBoundDevices();
+    await loadDevices();
+  }catch(e){ await centerAlert("删除失败："+e.message); }
+}
+async function openUserModal(){
+  if(!IS_ADMIN){ await centerAlert("只有管理员可用"); return; }
+  document.getElementById("userModal").classList.add("show");
+  await loadUsers();
+}
+function closeUserModal(){ document.getElementById("userModal").classList.remove("show"); }
+async function loadUsers(){
+  if(!IS_ADMIN) return;
+  try{
+    const data = await api("/admin/api/users");
+    const list = document.getElementById("userList");
+    const users = data.users || [];
+    if(!users.length){ list.innerHTML = `<div class="small">暂无用户，请先创建</div>`; return; }
+    list.innerHTML = users.map(u=>`<div class="user-item"><b>${escapeHtml(u.username)}</b>　ID:${u.id}　状态:${u.status}　设备:${u.device_count||0}/${u.max_devices}　密钥:${u.key_count||0}<div class="user-actions" style="margin-top:8px"><button onclick="generateKey(${u.id})">生成密钥</button><button onclick="toggleUser(${u.id}, '${u.status==='active'?'disabled':'active'}')">${u.status==='active'?'禁用':'启用'}</button></div><div id="key_${u.id}"></div></div>`).join("");
+  }catch(e){ await centerAlert("读取用户失败："+e.message); }
+}
+async function createUser(){
+  const username = document.getElementById("newUsername").value.trim();
+  const max_devices = Number(document.getElementById("newMaxDevices").value || 3);
+  const expires_at = document.getElementById("newExpires").value.trim();
+  if(!username){ await centerAlert("请输入用户名"); return; }
+  try{ await api("/admin/api/users", {method:"POST", body:JSON.stringify({username,max_devices,expires_at})}); document.getElementById("newUsername").value=""; await loadUsers(); }
+  catch(e){ await centerAlert("创建失败："+e.message); }
+}
+async function generateKey(uid){
+  try{ const data = await api(`/admin/api/users/${uid}/api-key`, {method:"POST", body:"{}"}); document.getElementById(`key_${uid}`).innerHTML = `<div class="key-once">完整密钥只显示一次：${escapeHtml(data.api_key)}</div>`; await loadUsers(); }
+  catch(e){ await centerAlert("生成失败："+e.message); }
+}
+async function toggleUser(uid,status){
+  try{ await api(`/admin/api/users/${uid}`, {method:"PATCH", body:JSON.stringify({status})}); await loadUsers(); }
+  catch(e){ await centerAlert("操作失败："+e.message); }
+}
+document.addEventListener("DOMContentLoaded", ()=>{ const b=document.getElementById("userManageBtn"); if(b && !IS_ADMIN) b.style.display="none"; });
+
 async function loadDevices(){
   try{
     const data = await api("/api/devices");
@@ -1508,7 +2042,7 @@ function showShot(code){
   const d = DEVICES.find(x=>x.machine_code===code) || {};
   const t = d.screenshot_time || 0;
   const img = document.getElementById("modalImg");
-  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?key=${encodeURIComponent(ADMIN_KEY)}&t=${t}`;
+  img.src = `/api/devices/${encodeURIComponent(code)}/screenshot/image?${ADMIN_KEY ? "key="+encodeURIComponent(ADMIN_KEY) : "api_key="+encodeURIComponent(USER_API_KEY)}&t=${t}`;
   document.getElementById("imgModal").classList.add("show");
 }
 function closeModal(){
@@ -1624,28 +2158,30 @@ setInterval(loadDevices,5000);
 </html>
 """
 
-def admin_auth_ok(request: Request, key: Optional[str] = None):
-    expected = os.environ.get("ADMIN_KEY", "").strip()
-    if not expected:
-        return True
-    provided = (key or request.headers.get("X-Admin-Key") or "").strip()
-    return provided == expected
 
 @app.get("/admin", response_class=HTMLResponse)
-def mobile_admin(request: Request, key: Optional[str] = None):
-    if not admin_auth_ok(request, key):
+def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    # ADMIN_KEY 可以看全部；api_key 可以看自己的控制台。
+    try:
+        get_auth_context(request, key, api_key)
+    except Exception:
         return HTMLResponse("""
         <html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
         <style>body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px}input,button{font-size:18px;padding:12px;border-radius:10px;margin-top:10px;width:100%}</style></head>
-        <body><h2>请输入控制台密码</h2><input id='k' placeholder='ADMIN_KEY' type='password'><button onclick='go()'>进入</button>
-        <script>function go(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)}</script></body></html>
+        <body><h2>请输入控制台密码或用户API密钥</h2>
+        <input id='k' placeholder='ADMIN_KEY 或 tk_live_xxx' type='password'>
+        <button onclick='goAdmin()'>管理员进入</button><button onclick='goUser()'>用户进入</button>
+        <script>
+        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)}
+        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('k').value)}
+        </script></body></html>
         """, status_code=401)
     return HTMLResponse(MOBILE_ADMIN_HTML)
 
 @app.get("/api/devices/{machine_code}/screenshot/image")
-def get_screenshot_image(machine_code: str, request: Request, key: Optional[str] = None):
-    if not admin_auth_ok(request, key):
-        raise HTTPException(status_code=401, detail="bad admin key")
+def get_screenshot_image(machine_code: str, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    machine_code = normalize_machine_code(machine_code)
+    verify_device_access(request, machine_code, key, api_key)
     shot = screenshots.get(machine_code)
     if not shot:
         raise HTTPException(status_code=404, detail="screenshot not found")
