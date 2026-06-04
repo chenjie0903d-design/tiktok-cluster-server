@@ -1052,11 +1052,6 @@ h1{font-size:22px;margin:0;font-weight:900}
 .multi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .multi-grid .wide{grid-column:span 2}
 body:not(.is-admin-mode) .admin-only{display:none!important}
-body.header-controls-collapsed .header-right-tools,
-body.header-controls-collapsed .desktop-top-grid,
-body.header-controls-collapsed .desktop-action-grid,
-body.header-controls-collapsed #mobileAllControls,
-body.header-controls-collapsed #mobileSelectedControls{display:none!important}
 .desktop-top-grid,.desktop-action-grid{display:none}
 
 .btn{border:0;border-radius:13px;color:#fff;font-size:15px;font-weight:850;padding:12px 8px;min-height:44px}
@@ -1120,6 +1115,8 @@ body.header-controls-collapsed #mobileSelectedControls{display:none!important}
 .syncbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid #d0d5dd;box-shadow:0 -2px 10px rgba(15,23,42,.12);padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
 .sync-title{font-size:15px;font-weight:900;color:#111827;margin-bottom:6px}
 .sync-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;align-items:center;margin-top:6px}
+.sync-top-tools{grid-template-columns:minmax(0,2fr) auto auto}
+.sync-top-tools .offline-cleaner{margin-top:0}
 .sync-row label{font-size:14px;color:#111827;font-weight:700;display:flex;align-items:center;gap:4px;min-width:0}
 .sync-row input[type="number"]{width:58px;min-width:48px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 5px;font-size:14px}
 .sync-row input[type="checkbox"],.sync-row input[type="radio"]{width:16px;height:16px;accent-color:#1d9bf0}
@@ -1145,6 +1142,7 @@ body.header-controls-collapsed #mobileSelectedControls{display:none!important}
   }
   .sync-title{margin:0;white-space:nowrap;font-size:14px}
   .sync-row{display:contents}
+  .sync-top-tools{display:contents}
   .sync-row label{
     font-size:13px;
     white-space:nowrap;
@@ -1351,12 +1349,13 @@ body.sync-collapsed{padding-bottom:42px}
 .pkg-btn.green{background:#1db954}
 @media (max-width:899px){
   .package-section{
-    grid-template-columns:1fr;
+    grid-template-columns:1fr 1fr;
     gap:7px;
   }
   .package-section .pkg-field{
     grid-template-columns:78px minmax(0,1fr);
     gap:7px;
+    grid-column:1 / -1;
   }
   .package-section label,
   .package-section .pkg-checks{
@@ -1368,10 +1367,20 @@ body.sync-collapsed{padding-bottom:42px}
   }
   .package-section .pkg-checks{
     grid-template-columns:1fr 1fr;
+    grid-column:1 / -1;
   }
   .pkg-btn{
     font-size:13px;
     min-height:36px;
+  }
+  .sync-top-tools{
+    grid-template-columns:1fr auto;
+  }
+  .sync-top-tools .offline-cleaner{
+    min-width:0;
+  }
+  .sync-top-tools .user-btn{
+    grid-column:2;
   }
 }
 
@@ -1744,6 +1753,8 @@ body.sync-collapsed{padding-bottom:42px}
 .input-modal{z-index:10060 !important}
 .key-modal{z-index:10070 !important}
 .user-modal,.user-manager-modal,.bind-modal{z-index:9000}
+.dialog-modal{z-index:300000 !important;align-items:center!important;justify-content:center!important}
+.dialog-modal.show{display:flex!important}
 
 
 /* V5.7：手机端刷新时间后面增加“用户”按钮 */
@@ -1757,7 +1768,7 @@ body.sync-collapsed{padding-bottom:42px}
   flex:1 1 auto;
   min-width:0;
 }
-.header-collapse-btn{border:0;border-radius:10px;background:#eef2f7;color:#1d9bf0;font-size:18px;font-weight:900;width:40px;height:34px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.header-collapse-btn{display:none!important}
 .mobile-user-btn{
   flex:0 0 auto;
   border:0;
@@ -1772,6 +1783,7 @@ body.sync-collapsed{padding-bottom:42px}
 @media (min-width:900px){
   .stats-line-wrap{display:flex!important;align-items:center!important}
   .mobile-user-btn{display:none!important}
+  .header-collapse-btn{display:none!important}
 }
 @media (max-width:899px){
   .stats-line-wrap{
@@ -1936,6 +1948,42 @@ body.sync-collapsed{padding-bottom:42px}
     font-size:18px!important;
     font-weight:950!important;
   }
+  .title-row,
+  .title-row h1{
+    display:block!important;
+  }
+  .title-row h1{
+    line-height:1.22!important;
+  }
+  .title-row .user-expire-title{
+    display:block;
+    margin-left:0!important;
+    margin-top:4px!important;
+    line-height:1.2!important;
+  }
+  .header-status-row{
+    display:flex!important;
+    flex-direction:column!important;
+    margin-top:8px!important;
+  }
+  .header-right-tools{
+    order:1!important;
+    width:100%!important;
+  }
+  .stats-line-wrap{
+    order:2!important;
+    display:flex!important;
+    width:100%!important;
+    align-items:center!important;
+    gap:8px!important;
+  }
+  .stats-line-wrap .stats{
+    flex:1 1 auto!important;
+    min-width:0!important;
+  }
+  .header-collapse-btn{
+    margin-left:auto!important;
+  }
 }
 
 
@@ -1984,18 +2032,10 @@ body.sync-collapsed{padding-bottom:42px}
 
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台 <span id="userExpireTitle" class="user-expire-title"></span></h1>
+    <h1>TikTok 集群控制台</h1>
   </div>
   <div class="header-status-row">
-    <div class="stats-line-wrap"><div class="stats" id="stats">加载中...</div><button id="mobileUserBtn" class="mobile-user-btn mobile-only admin-only" onclick="openUserModal()">用户</button><button id="headerControlsToggle" class="header-collapse-btn" onclick="toggleHeaderControls()">⌄</button></div>
-    <div class="header-right-tools">
-      <div class="offline-cleaner">
-        <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
-        <label><span class="offline-over-text">离线超过</span> <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
-      </div>
-      <button class="mobile-header-toggle mobile-only admin-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
-      <button class="refresh-btn bind-btn" onclick="openBoundModal()">绑定设备</button><button class="refresh-btn user-btn admin-only" id="userManageBtn" onclick="openUserModal()">用户管理</button><button class="refresh-btn" onclick="loadDevices()">刷新</button>
-    </div>
+    <div class="stats-line-wrap"><div class="stats" id="stats">加载中...</div><button class="refresh-btn" onclick="loadDevices()">刷新</button></div>
   </div>
 </div>
 
@@ -2057,7 +2097,15 @@ body.sync-collapsed{padding-bottom:42px}
 
 <div class="syncbar collapsed" id="syncbar">
   <button class="sync-toggle" id="syncToggle" onclick="toggleSyncBar()" title="展开/隐藏集群参数同步">⬆️</button>
-  <div class="sync-title">集群参数同步</div>
+  <div class="sync-title"><span id="userExpireTitle" class="user-expire-title"></span></div>
+  <div class="sync-row sync-top-tools">
+    <div class="offline-cleaner">
+      <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
+      <label><span class="offline-over-text">离线超过</span> <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
+    </div>
+    <button class="sync-btn bind-btn" onclick="openBoundModal()">绑定设备</button>
+    <button class="sync-btn user-btn admin-only" id="userManageBtn" onclick="openUserModal()">用户管理</button>
+  </div>
   <div class="sync-row">
     <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
     <label class="sync-network">网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
@@ -2232,17 +2280,27 @@ function centerPrompt(message, defaultValue=""){
 
 
 function setHeaderControlsCollapsed(collapsed){
+  if(window.matchMedia && !window.matchMedia("(max-width:899px)").matches){
+    document.body.classList.remove("header-controls-collapsed");
+    return;
+  }
   document.body.classList.toggle("header-controls-collapsed", collapsed);
   const btn = document.getElementById("headerControlsToggle");
-  if(btn) btn.textContent = collapsed ? "⌄" : "⌃";
+  if(btn) btn.textContent = collapsed ? "⬇️" : "⬆️";
   localStorage.setItem("HEADER_CONTROLS_COLLAPSED", collapsed ? "1" : "0");
 }
 function toggleHeaderControls(){
+  if(window.matchMedia && !window.matchMedia("(max-width:899px)").matches) return;
   setHeaderControlsCollapsed(!document.body.classList.contains("header-controls-collapsed"));
 }
 document.addEventListener("DOMContentLoaded", ()=>{
   const saved = localStorage.getItem("HEADER_CONTROLS_COLLAPSED");
   setHeaderControlsCollapsed(saved === null ? true : saved === "1");
+});
+window.addEventListener("resize", ()=>{
+  if(window.matchMedia && !window.matchMedia("(max-width:899px)").matches){
+    document.body.classList.remove("header-controls-collapsed");
+  }
 });
 
 function setMobileControlsCollapsed(collapsed){
