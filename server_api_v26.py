@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.0")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.2")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -334,7 +334,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V6.0：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V6.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -399,7 +399,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v6.0-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/tiktok", "version":"v26-web-v6.2-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -603,7 +603,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v6.0-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_0", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0"]}
+    return {"ok": True, "version": "v26-web-v6.2-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_2", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0", "single_login_auto_role_v6_1", "tiktok_path_v6_2"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -895,7 +895,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V6.0</title>
+<title>TikTok 集群控制台 Web V6.2</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -2703,12 +2703,34 @@ setInterval(loadDevices,5000);
 """
 
 
-@app.get("/admin", response_class=HTMLResponse)
+
+@app.get("/login")
+def unified_login(request: Request, token: str):
+    """
+    V6.1：统一登录入口。
+    输入 ADMIN_KEY 自动进管理员；输入用户 API Key 自动进普通用户控制台。
+    """
+    raw = str(token or "").strip()
+    if not raw:
+        raise HTTPException(status_code=401, detail="empty token")
+
+    if admin_auth_ok(request, raw):
+        return {"ok": True, "role": "admin", "url": f"/tiktok?key={raw}&v=62"}
+
+    try:
+        row = get_user_by_api_key(raw)
+        check_user_active(row)
+        return {"ok": True, "role": "user", "url": f"/tiktok?api_key={raw}&v=62"}
+    except Exception:
+        raise HTTPException(status_code=401, detail="登录失败，密码或密钥不正确")
+
+
+@app.get("/tiktok", response_class=HTMLResponse)
 def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     """
     V5.2：页面层也必须鉴权。
-    - ADMIN：/admin?key=ADMIN_KEY
-    - 普通用户：/admin?api_key=用户API密钥
+    - ADMIN：/tiktok?key=ADMIN_KEY
+    - 普通用户：/tiktok?api_key=用户API密钥
     - 不带 key/api_key 或错误时，只显示登录页，不返回控制台 HTML。
     """
     is_admin = admin_auth_ok(request, key)
@@ -2723,27 +2745,41 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
     if not is_admin and not user_row:
         return HTMLResponse("""
         <html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
-        <title>TikTok 控制台登录</title>
+        <title>TikTok 集群控制台登录</title>
         <style>
         body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px;background:#f4f6fa;color:#111827}
         .box{max-width:420px;margin:60px auto;background:#fff;border-radius:18px;padding:22px;box-shadow:0 8px 28px rgba(15,23,42,.12)}
-        h2{margin:0 0 16px;font-size:22px}
-        input,button{font-size:17px;padding:12px;border-radius:12px;margin-top:10px;width:100%;box-sizing:border-box}
+        h2{margin:0 0 18px;font-size:22px;font-weight:950}
+        input,button{font-size:17px;padding:13px;border-radius:12px;margin-top:12px;width:100%;box-sizing:border-box}
         input{border:1px solid #d0d5dd}
         button{border:0;background:#1d9bf0;color:#fff;font-weight:900}
-        .tip{font-size:13px;color:#667085;margin-top:12px;line-height:1.45}
+        .err{display:none;margin-top:12px;color:#d92d20;font-size:14px;font-weight:800}
         </style></head>
         <body><div class='box'>
         <h2>TikTok 集群控制台</h2>
-        <input id='k' placeholder='管理员密码 ADMIN_KEY' type='password'>
-        <button onclick='goAdmin()'>管理员进入</button>
-        <input id='a' placeholder='用户 API 密钥 tk_live_xxx' type='password'>
-        <button onclick='goUser()'>用户进入</button>
-        <div class='tip'>管理员用 ADMIN_KEY；普通用户用 API 密钥。没有正确密码不会加载控制台。</div>
+        <input id='token' placeholder='请输入登录密钥' type='password' autocomplete='off'>
+        <button onclick='goLogin()'>登录</button>
+        <div id='err' class='err'></div>
         </div>
         <script>
-        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=60'}
-        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=60'}
+        async function goLogin(){
+          const token = document.getElementById('token').value.trim();
+          const err = document.getElementById('err');
+          err.style.display='none';
+          if(!token){ err.textContent='请输入登录密钥'; err.style.display='block'; return; }
+          try{
+            const r = await fetch('/login?token=' + encodeURIComponent(token));
+            const data = await r.json();
+            if(!r.ok || !data.ok) throw new Error(data.detail || '登录失败');
+            location.href = data.url;
+          }catch(e){
+            err.textContent = e.message || '登录失败';
+            err.style.display='block';
+          }
+        }
+        document.getElementById('token').addEventListener('keydown', function(e){
+          if(e.key === 'Enter') goLogin();
+        });
         </script></body></html>
         """, status_code=401)
 
