@@ -616,7 +616,9 @@ def list_devices(request: Request, key: Optional[str] = None, api_key: Optional[
 @app.post("/api/devices/{machine_code}/command")
 def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     machine_code = normalize_machine_code(machine_code)
-    verify_device_access(request, machine_code, key, api_key)
+    ctx = verify_device_access(request, machine_code, key, api_key)
+    if not ctx["is_admin"] and str(cmd.command).strip() in ("update_package", "update_config", "update_github_config"):
+        raise HTTPException(status_code=403, detail="admin only")
     if machine_code not in devices:
         # 允许给已绑定但当前离线的设备排队？为了避免无效堆积，保持旧逻辑：必须已心跳出现。
         raise HTTPException(status_code=404, detail="device not found")
@@ -631,6 +633,8 @@ def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optio
 @app.post("/api/commands/all")
 def send_all(cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     ctx = get_auth_context(request, key, api_key)
+    if not ctx["is_admin"]:
+        raise HTTPException(status_code=403, detail="admin only")
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
@@ -713,7 +717,9 @@ def debug_devices(request: Request, key: Optional[str] = None):
 @app.post("/api/devices/{machine_code}/config")
 def set_device_config(machine_code: str, data: ConfigIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     machine_code = normalize_machine_code(machine_code)
-    verify_device_access(request, machine_code, key, api_key)
+    ctx = verify_device_access(request, machine_code, key, api_key)
+    if not ctx["is_admin"]:
+        raise HTTPException(status_code=403, detail="admin only")
     if machine_code not in devices:
         raise HTTPException(status_code=404, detail="device not found")
     configs[machine_code] = {"config": data.config, "updated_at": time.time()}
@@ -724,6 +730,8 @@ def set_device_config(machine_code: str, data: ConfigIn, request: Request, key: 
 @app.post("/api/config/all")
 def set_all_config(data: ConfigIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     ctx = get_auth_context(request, key, api_key)
+    if not ctx["is_admin"]:
+        raise HTTPException(status_code=403, detail="admin only")
     count = 0
     now = time.time()
     for machine_code, d in devices.items():
@@ -1703,7 +1711,7 @@ body.sync-collapsed{padding-bottom:42px}
 .bound-row button,.bound-list button,.user-actions button{border:0;border-radius:10px;padding:10px;font-weight:900;background:#1d9bf0;color:#fff}
 .bound-list{display:grid;gap:8px}.bound-item{border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:14px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.bound-item .meta{color:#667085;font-size:12px;margin-top:3px}.bound-item button{background:#ff4d4f}.bound-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.bound-actions button{border:0;border-radius:10px;padding:11px;font-weight:900}.bound-cancel{background:#e5e7eb;color:#111827}.bound-save{background:#1db954;color:#fff}
 .user-panel{display:grid;gap:10px}.user-create{display:grid;grid-template-columns:1fr 90px 130px 130px 90px;gap:8px}.user-create input{border:1px solid #d0d5dd;border-radius:10px;padding:10px}.user-item{border:1px solid #e5e7eb;border-radius:10px;padding:10px}.key-once{background:#fff4e5;color:#b54708;padding:8px;border-radius:8px;margin-top:6px;word-break:break-all;font-weight:900}
-@media (max-width:899px){.header-right-tools{gap:5px!important}.bound-row{grid-template-columns:1fr 70px 70px}.user-btn{display:none!important}.bind-btn,.refresh-btn,.mobile-header-toggle{padding-left:8px!important;padding-right:8px!important}.user-create{grid-template-columns:1fr 65px 90px 90px}.user-create button{grid-column:1/-1}}
+@media (max-width:899px){.header-right-tools{gap:5px!important}.bound-row{grid-template-columns:1fr 70px 70px}.header-status-row .user-btn{display:none!important}.bind-btn,.refresh-btn,.mobile-header-toggle{padding-left:8px!important;padding-right:8px!important}.user-create{grid-template-columns:1fr 65px 90px 90px}.user-create button{grid-column:1/-1}}
 
 
 /* V5.3：API Key 生成后固定弹窗，不被自动刷新冲掉 */
@@ -2014,6 +2022,121 @@ body.sync-collapsed{padding-bottom:42px}
   }
 }
 
+/* Final layout: keep the bottom control panel readable on mobile and desktop. */
+.syncbar{
+  display:block!important;
+}
+.syncbar .sync-title{
+  margin:0 0 8px!important;
+}
+.syncbar .sync-row{
+  display:grid!important;
+  margin-top:7px!important;
+}
+.syncbar .sync-top-tools{
+  display:grid!important;
+  align-items:center!important;
+}
+@media (max-width:899px){
+  .syncbar{
+    padding:9px 10px calc(10px + env(safe-area-inset-bottom))!important;
+  }
+  .syncbar .sync-title{
+    font-size:16px!important;
+    line-height:1.25!important;
+  }
+  .syncbar .sync-top-tools{
+    grid-template-columns:1fr 1fr!important;
+    gap:8px!important;
+  }
+  .syncbar .sync-top-tools .offline-cleaner{
+    grid-column:1 / -1!important;
+    display:grid!important;
+    grid-template-columns:auto auto!important;
+    gap:8px!important;
+    align-items:center!important;
+    font-size:15px!important;
+  }
+  .syncbar .sync-top-tools .bind-btn,
+  .syncbar .sync-top-tools .user-btn{
+    width:100%!important;
+    min-height:42px!important;
+    font-size:16px!important;
+  }
+  .syncbar .sync-row:not(.sync-top-tools){
+    grid-template-columns:repeat(4,minmax(0,1fr))!important;
+    gap:7px!important;
+  }
+}
+@media (min-width:900px){
+  .syncbar{
+    padding:18px 18px calc(18px + env(safe-area-inset-bottom))!important;
+  }
+  .syncbar .sync-title{
+    font-size:18px!important;
+    margin-bottom:12px!important;
+  }
+  .syncbar .sync-top-tools{
+    grid-template-columns:minmax(320px,1.5fr) 170px 170px!important;
+    gap:12px!important;
+    max-width:920px!important;
+    margin-bottom:12px!important;
+  }
+  .syncbar .sync-top-tools .offline-cleaner{
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    gap:14px!important;
+    min-width:0!important;
+    font-size:17px!important;
+  }
+  .syncbar .sync-row:not(.sync-top-tools){
+    grid-template-columns:repeat(4,minmax(170px,1fr))!important;
+    gap:12px!important;
+    margin-top:10px!important;
+  }
+  .syncbar .sync-row label{
+    font-size:16px!important;
+  }
+  .syncbar .sync-row input[type="number"]{
+    width:72px!important;
+    min-width:68px!important;
+    padding:9px 8px!important;
+    font-size:16px!important;
+  }
+  .syncbar .sync-btn{
+    min-height:46px!important;
+    font-size:16px!important;
+    padding:10px 10px!important;
+  }
+  .package-section{
+    grid-template-columns:repeat(4,minmax(180px,1fr))!important;
+    gap:12px!important;
+    margin-top:14px!important;
+    padding-top:14px!important;
+  }
+  .package-section .pkg-field{
+    grid-column:auto!important;
+  }
+  .package-section .pkg-title,
+  .package-section .pkg-checks{
+    grid-column:span 2!important;
+  }
+  .package-section label,
+  .package-section .pkg-checks{
+    font-size:15px!important;
+  }
+  .package-section input[type="text"]{
+    min-height:42px!important;
+    font-size:15px!important;
+    padding:9px 10px!important;
+  }
+  .package-section .pkg-btn{
+    grid-column:span 2!important;
+    min-height:48px!important;
+    font-size:16px!important;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -2106,26 +2229,26 @@ body.sync-collapsed{padding-bottom:42px}
     <button class="sync-btn bind-btn" onclick="openBoundModal()">绑定设备</button>
     <button class="sync-btn user-btn admin-only" id="userManageBtn" onclick="openUserModal()">用户管理</button>
   </div>
-  <div class="sync-row">
+  <div class="sync-row admin-only">
     <label class="sync-cutip">切IP <input id="sync_cut_ip" type="number" value="5"></label>
     <label class="sync-network">网络 <span><input name="sync_network" type="radio" value="4G">4G <input name="sync_network" type="radio" value="5G" checked>5G</span></label>
     <label class="sync-blue">蓝色不变切IP <input id="sync_blue_no_change_auto_ip" type="number" value="310"></label>
     <label class="sync-ocr">OCR间隔 <input id="sync_ocr_interval" type="number" value="30"></label>
   </div>
-  <div class="sync-row">
+  <div class="sync-row admin-only">
     <label class="sync-norestart">时长不走重启 <input id="sync_check_no_response" type="number" value="150"></label>
     <label class="sync-restartthen"><input id="sync_restart_then_start" type="checkbox" checked>重启后启动</label>
     <label class="sync-restartdelay">重启延迟 <input id="sync_restart_open_delay" type="number" value="3"></label>
     <label class="sync-startclicks">点起动 <input id="sync_start_clicks" type="number" value="5"></label>
   </div>
-  <div class="sync-row">
+  <div class="sync-row admin-only">
     <button class="sync-btn primary sync-save-selected" onclick="syncConfigSelected()"><span class="two-line">保存并<br>同步选中</span></button>
     <button class="sync-btn green sync-save-all" onclick="syncConfigAll()"><span class="two-line">保存并<br>同步全部</span></button>
     <button class="sync-btn sync-select-online" onclick="selectOnline()">多选在线</button>
     <button class="sync-btn sync-clear" onclick="clearSelected()">取消选择</button>
   </div>
 
-  <div class="package-section">
+  <div class="package-section admin-only">
     <label class="pkg-field pkg-url">更新包URL <input id="pkg_url" type="text" placeholder="GitHub Release zip 下载链接"></label>
     <label class="pkg-field pkg-exe">EXE名 <input id="pkg_exe" type="text" placeholder="必须带 .exe 后缀，例如：TIKTOK点赞系统-3.19 D版本.exe"></label>
     <label class="pkg-field pkg-sha">SHA256 <input id="pkg_sha256" type="text" placeholder="可选，建议填写；不要带 sha256: 前缀"></label>
@@ -2425,13 +2548,14 @@ function render(){
     const card = document.createElement("div");
     card.className = "card " + stateClass(d);
     const checked = selected.has(code) ? "checked" : "";
+    const selectBox = IS_ADMIN ? `<input class="select-box" type="checkbox" ${checked} onchange="toggleSelect('${code}', this.checked)">` : "";
     const loc = d.location_carrier || `${d.location||""}${d.carrier||""}` || "-";
     const bad = isBadCarrier(d);
     const thumb = d.has_screenshot ? `<div class="action-side-shot"><img class="thumb" onclick="event.stopPropagation();showShot('${code}')" src="/api/devices/${encodeURIComponent(code)}/screenshot/image?${ADMIN_KEY ? 'key='+encodeURIComponent(ADMIN_KEY) : 'api_key='+encodeURIComponent(USER_API_KEY)}&t=${d.screenshot_time||0}"><div>点击放大</div></div>` : `<div class="action-side-shot action-side-empty">缩略图<br>暂无</div>`;
     card.innerHTML = `
       <div class="seq">${seq}</div>
       <div class="dev-head">
-        <input class="select-box" type="checkbox" ${checked} onchange="toggleSelect('${code}', this.checked)">
+        ${selectBox}
         <div class="name" title="${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}">${escapeHtml(d.device_name||code.slice(0,8)||"未命名")}</div>
         <div class="ago-top">${agoText(d)}</div>
       </div>
@@ -3114,45 +3238,6 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
 
     if not is_admin and not user_row:
         return HTMLResponse(LOGIN_HTML, status_code=401)
-        return HTMLResponse("""
-        <html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
-        <title>TikTok 集群控制台登录</title>
-        <style>
-        body{font-family:-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;padding:24px;background:#f4f6fa;color:#111827}
-        .box{max-width:420px;margin:60px auto;background:#fff;border-radius:18px;padding:22px;box-shadow:0 8px 28px rgba(15,23,42,.12)}
-        h2{margin:0 0 18px;font-size:22px;font-weight:950}
-        input,button{font-size:17px;padding:13px;border-radius:12px;margin-top:12px;width:100%;box-sizing:border-box}
-        input{border:1px solid #d0d5dd}
-        button{border:0;background:#1d9bf0;color:#fff;font-weight:900}
-        .err{display:none;margin-top:12px;color:#d92d20;font-size:14px;font-weight:800}
-        </style></head>
-        <body><div class='box'>
-        <h2>TikTok 集群控制台</h2>
-        <input id='token' placeholder='请输入登录密钥' type='password' autocomplete='off'>
-        <button onclick='goLogin()'>登录</button>
-        <div id='err' class='err'></div>
-        </div>
-        <script>
-        async function goLogin(){
-          const token = document.getElementById('token').value.trim();
-          const err = document.getElementById('err');
-          err.style.display='none';
-          if(!token){ err.textContent='请输入登录密钥'; err.style.display='block'; return; }
-          try{
-            const r = await fetch('/login?token=' + encodeURIComponent(token));
-            const data = await r.json();
-            if(!r.ok || !data.ok) throw new Error(data.detail || '登录失败');
-            location.href = data.url;
-          }catch(e){
-            err.textContent = e.message || '登录失败';
-            err.style.display='block';
-          }
-        }
-        document.getElementById('token').addEventListener('keydown', function(e){
-          if(e.key === 'Enter') goLogin();
-        });
-        </script></body></html>
-        """, status_code=401)
 
     return HTMLResponse(MOBILE_ADMIN_HTML)
 
