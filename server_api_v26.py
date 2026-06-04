@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.2")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.5")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -101,6 +101,7 @@ def init_db():
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 key_hash TEXT UNIQUE NOT NULL,
                 key_prefix TEXT NOT NULL,
+                key_plain TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
                 expires_at TIMESTAMPTZ NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -122,6 +123,7 @@ def init_db():
             );
             ''')
             cur.execute("CREATE INDEX IF NOT EXISTS idx_bound_devices_user_id ON bound_devices(user_id);")
+            cur.execute("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_plain TEXT;")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);")
             conn.commit()
     print("[multi-user] PostgreSQL tables ready")
@@ -311,6 +313,7 @@ class UserCreateIn(BaseModel):
     username: str
     max_devices: int = 3
     expires_at: Optional[str] = None
+    expires_days: Optional[int] = None
 
 class UserUpdateIn(BaseModel):
     username: Optional[str] = None
@@ -331,7 +334,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V5.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V5.5：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -396,7 +399,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.2-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.5-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -600,7 +603,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v5.2-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_2", "admin_key_strict", "admin_page_auth_gate"]}
+    return {"ok": True, "version": "v26-web-v5.5-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_5", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -653,10 +656,101 @@ def get_log(machine_code: str, request: Request, key: Optional[str] = None, api_
     return {"ok": True, "log": log}
 
 # ==================== V5.0 用户/密钥/绑定设备接口 ====================
+
+@app.get("/admin/api/users/{user_id}/api-keys")
+def admin_list_user_api_keys(user_id: int, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    rows = db_query("SELECT id,user_id,key_prefix,key_plain,status,created_at,last_used_at,expires_at FROM api_keys WHERE user_id=%s ORDER BY id DESC", [user_id])
+    return {"ok": True, "api_keys": rows}
+
+@app.delete("/admin/api/users/{user_id}")
+def admin_delete_user(user_id: int, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    codes = db_query("SELECT machine_code FROM bound_devices WHERE user_id=%s", [user_id])
+    db_query("DELETE FROM users WHERE id=%s", [user_id], commit=True)
+    for r in codes:
+        code = r.get("machine_code")
+        devices.pop(code, None); commands.pop(code, None); screenshots.pop(code, None); configs.pop(code, None); logs_store.pop(code, None)
+    return {"ok": True}
+
+@app.post("/admin/api/users/{user_id}/bound-devices")
+def admin_add_user_bound_device(user_id: int, data: BoundDeviceIn, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    code = normalize_machine_code(data.machine_code)
+    if not code:
+        raise HTTPException(status_code=400, detail="machine_code empty")
+    u = db_query("SELECT id,max_devices FROM users WHERE id=%s", [user_id], one=True)
+    if not u:
+        raise HTTPException(status_code=404, detail="user not found")
+    old = db_query("SELECT user_id FROM bound_devices WHERE machine_code=%s", [code], one=True)
+    if old and int(old["user_id"]) != int(user_id):
+        raise HTTPException(status_code=409, detail="machine_code bound to another user")
+    if not old:
+        cnt = db_query("SELECT COUNT(*) AS c FROM bound_devices WHERE user_id=%s", [user_id], one=True)["c"]
+        if int(cnt) >= int(u.get("max_devices") or 0):
+            raise HTTPException(status_code=403, detail="device limit reached")
+    row = db_query("""
+        INSERT INTO bound_devices(user_id,machine_code,device_name,bind_source)
+        VALUES(%s,%s,%s,'manual_admin')
+        ON CONFLICT(machine_code) DO UPDATE SET device_name=EXCLUDED.device_name,status='active'
+        RETURNING *
+    """, [user_id, code, data.device_name or code[:8]], one=True, commit=True)
+    return {"ok": True, "device": row}
+
+@app.get("/admin/api/bound-devices")
+def admin_list_all_bound_devices(request: Request, key: Optional[str] = None, user_id: Optional[int] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    params = []
+    where = ""
+    if user_id:
+        where = "WHERE bd.user_id=%s"
+        params.append(user_id)
+    rows = db_query(f"""
+        SELECT bd.*, u.username
+        FROM bound_devices bd
+        JOIN users u ON u.id=bd.user_id
+        {where}
+        ORDER BY bd.id DESC
+    """, params)
+    return {"ok": True, "devices": rows}
+
+@app.delete("/admin/api/bound-devices/{machine_code}")
+def admin_delete_any_bound_device(machine_code: str, request: Request, key: Optional[str] = None):
+    if not admin_auth_ok(request, key):
+        raise HTTPException(status_code=401, detail="bad admin key")
+    code = normalize_machine_code(machine_code)
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    db_query("DELETE FROM bound_devices WHERE machine_code=%s", [code], commit=True)
+    devices.pop(code, None); commands.pop(code, None); screenshots.pop(code, None); configs.pop(code, None); logs_store.pop(code, None)
+    return {"ok": True}
+
+
 @app.get("/api/me")
 def api_me(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     ctx = get_auth_context(request, key, api_key)
-    return {"ok": True, "is_admin": ctx["is_admin"], "user_id": ctx.get("user_id"), "username": ctx.get("username")}
+    user = None
+    if not ctx["is_admin"] and ctx.get("user_id") and multi_user_enabled():
+        user = db_query("SELECT id, username, status, expires_at, max_devices, bind_mode FROM users WHERE id=%s", [ctx.get("user_id")], one=True)
+    return {
+        "ok": True,
+        "is_admin": ctx["is_admin"],
+        "user_id": ctx.get("user_id"),
+        "username": ctx.get("username"),
+        "user": user or {"username": ctx.get("username")}
+    }
 
 @app.get("/api/bound-devices")
 def api_bound_devices(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
@@ -719,10 +813,24 @@ def admin_create_user(data: UserCreateIn, request: Request, key: Optional[str] =
     username = str(data.username or "").strip()
     if not username:
         raise HTTPException(status_code=400, detail="username required")
-    row = db_query('''
+
+    # V5.4：优先按“天数”创建到期时间；兼容旧 expires_at 字符串。
+    if data.expires_days is not None:
+        try:
+            days = int(data.expires_days)
+        except Exception:
+            days = 0
+        if days > 0:
+            row = db_query("""
+                INSERT INTO users(username, max_devices, expires_at, bind_mode)
+                VALUES(%s,%s,NOW() + (%s || ' days')::interval,'whitelist') RETURNING *
+            """, [username, int(data.max_devices or 3), days], one=True, commit=True)
+            return {"ok": True, "user": row}
+
+    row = db_query("""
         INSERT INTO users(username, max_devices, expires_at, bind_mode)
         VALUES(%s,%s,NULLIF(%s,'')::timestamptz,'whitelist') RETURNING *
-    ''', [username, int(data.max_devices or 3), data.expires_at or ""], one=True, commit=True)
+    """, [username, int(data.max_devices or 3), data.expires_at or ""], one=True, commit=True)
     return {"ok": True, "user": row}
 
 @app.patch("/admin/api/users/{user_id}")
@@ -756,7 +864,7 @@ def admin_generate_api_key(user_id: int, request: Request, key: Optional[str] = 
         raise HTTPException(status_code=404, detail="user not found")
     raw = make_api_key()
     prefix = raw[:16]
-    row = db_query('''INSERT INTO api_keys(user_id,key_hash,key_prefix) VALUES(%s,%s,%s) RETURNING id,user_id,key_prefix,status,created_at''', [user_id, api_key_hash(raw), prefix], one=True, commit=True)
+    row = db_query('''INSERT INTO api_keys(user_id,key_hash,key_prefix,key_plain) VALUES(%s,%s,%s,%s) RETURNING id,user_id,key_prefix,key_plain,status,created_at''', [user_id, api_key_hash(raw), prefix, raw], one=True, commit=True)
     return {"ok": True, "api_key": raw, "record": row}
 
 @app.get("/admin/api/bound-devices")
@@ -787,7 +895,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V5.2</title>
+<title>TikTok 集群控制台 Web V5.5</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -1446,12 +1554,67 @@ body.sync-collapsed{padding-bottom:42px}
 .user-panel{display:grid;gap:10px}.user-create{display:grid;grid-template-columns:1fr 90px 130px 90px;gap:8px}.user-create input{border:1px solid #d0d5dd;border-radius:10px;padding:10px}.user-item{border:1px solid #e5e7eb;border-radius:10px;padding:10px}.key-once{background:#fff4e5;color:#b54708;padding:8px;border-radius:8px;margin-top:6px;word-break:break-all;font-weight:900}
 @media (max-width:899px){.header-right-tools{gap:5px!important}.bound-row{grid-template-columns:1fr 70px 70px}.user-btn{display:none!important}.bind-btn,.refresh-btn,.mobile-header-toggle{padding-left:8px!important;padding-right:8px!important}.user-create{grid-template-columns:1fr 65px 110px}.user-create button{grid-column:1/-1}}
 
+
+/* V5.3：API Key 生成后固定弹窗，不被自动刷新冲掉 */
+.key-modal{position:fixed;inset:0;background:rgba(15,23,42,.58);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}
+.key-modal.show{display:flex}
+.key-box{width:min(620px,94vw);background:#fff;border-radius:18px;padding:20px;box-shadow:0 14px 40px rgba(15,23,42,.30)}
+.key-title{font-size:22px;font-weight:950;color:#111827;margin-bottom:10px}
+.key-tip{font-size:14px;color:#d92d20;font-weight:800;margin-bottom:12px;line-height:1.45}
+.key-value{width:100%;min-height:92px;border:1px solid #d0d5dd;border-radius:12px;padding:12px;font-size:16px;font-weight:800;word-break:break-all;resize:none;background:#f8fafc;color:#111827}
+.key-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.key-actions button{border:0;border-radius:12px;padding:13px;font-size:17px;font-weight:900}
+.key-copy{background:#1d9bf0;color:#fff}
+.key-close{background:#e5e7eb;color:#111827}
+
+
+/* V5.5：用户到期时间显示在标题上 */
+.user-expire-title{
+  display:inline-block;
+  margin-left:8px;
+  font-size:15px;
+  font-weight:900;
+  color:#1d9bf0;
+  vertical-align:middle;
+}
+.user-expire-title.admin{
+  color:#079455;
+}
+.user-expire-title.expiring{
+  color:#b54708;
+}
+.user-expire-title.expired{
+  color:#d92d20;
+}
+@media (max-width:899px){
+  .user-expire-title{
+    display:block;
+    margin-left:0;
+    margin-top:3px;
+    font-size:14px;
+    line-height:1.2;
+  }
+}
+
 </style>
 </head>
 <body>
+
+<div id="apiKeyModal" class="key-modal">
+  <div class="key-box">
+    <div class="key-title">API 密钥已生成</div>
+    <div class="key-tip">完整密钥只显示这一次。请立即复制保存，关闭后后台不会再显示完整密钥。</div>
+    <textarea id="apiKeyValue" class="key-value" readonly></textarea>
+    <div class="key-actions">
+      <button class="key-copy" onclick="copyGeneratedApiKey()">复制密钥</button>
+      <button class="key-close" onclick="closeGeneratedApiKey()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div class="header">
   <div class="title-row">
-    <h1>TikTok 集群控制台</h1>
+    <h1>TikTok 集群控制台 <span id="userExpireTitle" class="user-expire-title"></span></h1>
   </div>
   <div class="header-status-row">
     <div class="stats" id="stats">加载中...</div>
@@ -1591,7 +1754,7 @@ body.sync-collapsed{padding-bottom:42px}
     <div class="user-create">
       <input id="newUsername" placeholder="用户名">
       <input id="newMaxDevices" type="number" value="3" placeholder="设备数">
-      <input id="newExpires" placeholder="到期时间，可空">
+      <input id="newDays" placeholder="到期天数，如30">
       <button onclick="createUser()">创建用户</button>
     </div>
     <div id="userList" class="user-panel"></div>
@@ -1928,6 +2091,41 @@ async function openUserModal(){
   await loadUsers();
 }
 function closeUserModal(){ document.getElementById("userModal").classList.remove("show"); }
+
+let GENERATED_API_KEY_CACHE = "";
+
+function showGeneratedApiKey(key){
+  GENERATED_API_KEY_CACHE = key || "";
+  const modal = document.getElementById("apiKeyModal");
+  const val = document.getElementById("apiKeyValue");
+  if(val){
+    val.value = GENERATED_API_KEY_CACHE;
+    setTimeout(()=>{ try{ val.focus(); val.select(); }catch(e){} }, 80);
+  }
+  if(modal) modal.classList.add("show");
+}
+
+async function copyGeneratedApiKey(){
+  const key = GENERATED_API_KEY_CACHE || (document.getElementById("apiKeyValue")?.value || "");
+  if(!key) return;
+  try{
+    await navigator.clipboard.writeText(key);
+    await centerAlert("已复制 API 密钥");
+  }catch(e){
+    const val = document.getElementById("apiKeyValue");
+    if(val){ val.focus(); val.select(); try{ document.execCommand("copy"); }catch(_e){} }
+    await centerAlert("已尝试复制，如未成功请手动长按/选中复制");
+  }
+}
+
+function closeGeneratedApiKey(){
+  const modal = document.getElementById("apiKeyModal");
+  if(modal) modal.classList.remove("show");
+  GENERATED_API_KEY_CACHE = "";
+  const val = document.getElementById("apiKeyValue");
+  if(val) val.value = "";
+}
+
 async function loadUsers(){
   if(!IS_ADMIN) return;
   try{
@@ -1935,21 +2133,70 @@ async function loadUsers(){
     const list = document.getElementById("userList");
     const users = data.users || [];
     if(!users.length){ list.innerHTML = `<div class="small">暂无用户，请先创建</div>`; return; }
-    list.innerHTML = users.map(u=>`<div class="user-item"><b>${escapeHtml(u.username)}</b>　ID:${u.id}　状态:${u.status}　设备:${u.device_count||0}/${u.max_devices}　密钥:${u.key_count||0}<div class="user-actions" style="margin-top:8px"><button onclick="generateKey(${u.id})">生成密钥</button><button onclick="toggleUser(${u.id}, '${u.status==='active'?'disabled':'active'}')">${u.status==='active'?'禁用':'启用'}</button></div><div id="key_${u.id}"></div></div>`).join("");
+    list.innerHTML = users.map(u=>`<div class="user-item"><b>${escapeHtml(u.username)}</b>　ID:${u.id}　状态:${u.status}　设备:${u.device_count||0}/${u.max_devices}　密钥:${u.key_count||0}<div class="user-actions" style="margin-top:8px"><button onclick="generateKey(${u.id})">生成密钥</button><button onclick="showUserKeys(${u.id})">查看密钥</button><button onclick="adminAddDevice(${u.id})">加设备</button><button onclick="deleteUser(${u.id})">删用户</button><button onclick="toggleUser(${u.id}, '${u.status==='active'?'disabled':'active'}')">${u.status==='active'?'禁用':'启用'}</button></div><div id="key_${u.id}"></div></div>`).join("");
   }catch(e){ await centerAlert("读取用户失败："+e.message); }
 }
 async function createUser(){
-  const username = document.getElementById("newUsername").value.trim();
-  const max_devices = Number(document.getElementById("newMaxDevices").value || 3);
-  const expires_at = document.getElementById("newExpires").value.trim();
-  if(!username){ await centerAlert("请输入用户名"); return; }
-  try{ await api("/admin/api/users", {method:"POST", body:JSON.stringify({username,max_devices,expires_at})}); document.getElementById("newUsername").value=""; await loadUsers(); }
+  try{
+    const username = document.getElementById("newUsername").value.trim();
+    const max_devices = Number(document.getElementById("newMax").value || 3);
+    const expires_days = Number(document.getElementById("newDays").value || 0);
+    await api("/admin/api/users", {
+      method:"POST",
+      body:JSON.stringify({username, max_devices, expires_days})
+    });
+    document.getElementById("newUsername").value="";
+    document.getElementById("newMax").value="";
+    document.getElementById("newDays").value="";
+    await loadUsers();
+  }
   catch(e){ await centerAlert("创建失败："+e.message); }
 }
 async function generateKey(uid){
-  try{ const data = await api(`/admin/api/users/${uid}/api-key`, {method:"POST", body:"{}"}); document.getElementById(`key_${uid}`).innerHTML = `<div class="key-once">完整密钥只显示一次：${escapeHtml(data.api_key)}</div>`; await loadUsers(); }
+  try{
+    const data = await api(`/admin/api/users/${uid}/api-key`, {method:"POST", body:"{}"});
+    showGeneratedApiKey(data.api_key || "");
+    await loadUsers();
+  }
   catch(e){ await centerAlert("生成失败："+e.message); }
 }
+
+async function showUserKeys(uid){
+  try{
+    const data = await api(`/admin/api/users/${uid}/api-keys`);
+    const rows = data.api_keys || [];
+    if(!rows.length){ await centerAlert("这个用户还没有密钥"); return; }
+    const text = rows.map(k=>{
+      const full = k.key_plain || "旧密钥不可查看，请重新生成";
+      return `ID:${k.id} 状态:${k.status} 前缀:${k.key_prefix}\n${full}`;
+    }).join("\n\n");
+    showGeneratedApiKey(text);
+  }catch(e){ await centerAlert("查看密钥失败："+e.message); }
+}
+
+async function adminAddDevice(uid){
+  try{
+    const code = await centerPrompt("输入要绑定到该用户的机器码：", "");
+    if(!code) return;
+    const name = await centerPrompt("设备名称，可空：", "");
+    await api(`/admin/api/users/${uid}/bound-devices`, {
+      method:"POST",
+      body:JSON.stringify({machine_code:code, device_name:name})
+    });
+    await centerAlert("已添加绑定设备");
+    await loadUsers();
+  }catch(e){ await centerAlert("添加设备失败："+e.message); }
+}
+
+async function deleteUser(uid){
+  try{
+    if(!await centerConfirm("确定删除这个用户？该用户的密钥和绑定设备也会删除。")) return;
+    await api(`/admin/api/users/${uid}`, {method:"DELETE"});
+    await centerAlert("用户已删除");
+    await loadUsers();
+  }catch(e){ await centerAlert("删除用户失败："+e.message); }
+}
+
 async function toggleUser(uid,status){
   try{ await api(`/admin/api/users/${uid}`, {method:"PATCH", body:JSON.stringify({status})}); await loadUsers(); }
   catch(e){ await centerAlert("操作失败："+e.message); }
@@ -2156,7 +2403,58 @@ async function updatePackageAll(){
 }
 
 
+
+function formatExpireDateText(value){
+  if(!value) return "永久";
+  try{
+    const d = new Date(value);
+    if(isNaN(d.getTime())) return String(value).replace("T"," ").slice(0,19);
+    const pad = n => String(n).padStart(2,"0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }catch(e){
+    return String(value || "");
+  }
+}
+function expireRemainText(value){
+  if(!value) return "";
+  try{
+    const d = new Date(value);
+    if(isNaN(d.getTime())) return "";
+    const diff = d.getTime() - Date.now();
+    if(diff <= 0) return "已过期";
+    const days = Math.ceil(diff / 86400000);
+    return `剩余${days}天`;
+  }catch(e){ return ""; }
+}
+async function loadUserExpireTitle(){
+  const el = document.getElementById("userExpireTitle");
+  if(!el) return;
+  try{
+    const me = await api("/api/me");
+    if(me.is_admin){
+      el.textContent = "ADMIN 管理员";
+      el.className = "user-expire-title admin";
+      return;
+    }
+    const user = me.user || {};
+    const exp = user.user_expires_at || user.expires_at || "";
+    const remain = expireRemainText(exp);
+    el.textContent = `用户：${user.username || ""}　到期：${formatExpireDateText(exp)}${remain ? "　" + remain : ""}`;
+    el.className = "user-expire-title";
+    if(remain.includes("已过期")) el.classList.add("expired");
+    else{
+      try{
+        const days = Math.ceil((new Date(exp).getTime() - Date.now()) / 86400000);
+        if(days <= 7) el.classList.add("expiring");
+      }catch(e){}
+    }
+  }catch(e){
+    el.textContent = "";
+  }
+}
+
 loadOfflineCleaner();
+loadUserExpireTitle();
 loadDevices();
 setInterval(loadDevices,5000);
 </script>
@@ -2204,8 +2502,8 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
         <div class='tip'>管理员用 ADMIN_KEY；普通用户用 API 密钥。没有正确密码不会加载控制台。</div>
         </div>
         <script>
-        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=52'}
-        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=52'}
+        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=55'}
+        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=55'}
         </script></body></html>
         """, status_code=401)
 
