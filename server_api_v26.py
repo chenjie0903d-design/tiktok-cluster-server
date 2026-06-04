@@ -417,6 +417,11 @@ class PasswordLoginIn(BaseModel):
     username: str
     password: str
 
+class PasswordLoginChangeIn(BaseModel):
+    username: str
+    old_password: str
+    new_password: str
+
 class PasswordChangeIn(BaseModel):
     old_password: Optional[str] = None
     new_password: str
@@ -977,6 +982,21 @@ def login_password(data: PasswordLoginIn):
         raise HTTPException(status_code=401, detail="username or password incorrect")
     raw = get_or_create_login_api_key(int(user["id"]))
     return {"ok": True, "role": "user", "api_key": raw, "url": f"/tiktok?api_key={raw}&v=63"}
+
+@app.post("/api/change-password-login")
+def change_password_from_login(data: PasswordLoginChangeIn):
+    if not multi_user_enabled():
+        raise HTTPException(status_code=400, detail="database disabled")
+    username = str(data.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="username required")
+    user = db_query("SELECT * FROM users WHERE username=%s", [username], one=True)
+    check_plain_user_active(user)
+    if not user.get("password_hash") or not verify_password(data.old_password or "", user.get("password_hash")):
+        raise HTTPException(status_code=401, detail="old password incorrect")
+    password_hash = make_password_hash(data.new_password)
+    db_query("UPDATE users SET password_hash=%s, updated_at=NOW() WHERE id=%s", [password_hash, user["id"]], commit=True)
+    return {"ok": True}
 
 @app.post("/admin/api/users/{user_id}/password")
 def admin_reset_user_password(user_id: int, data: PasswordResetIn, request: Request, key: Optional[str] = None):
@@ -1961,14 +1981,14 @@ body.sync-collapsed{padding-bottom:42px}
     <h1>TikTok 集群控制台 <span id="userExpireTitle" class="user-expire-title"></span></h1>
   </div>
   <div class="header-status-row">
-    <div class="stats-line-wrap"><div class="stats" id="stats">加载中...</div><button id="mobileUserBtn" class="mobile-user-btn mobile-only" onclick="openUserModal()">用户</button></div>
+    <div class="stats-line-wrap"><div class="stats" id="stats">加载中...</div><button id="mobileUserBtn" class="mobile-user-btn mobile-only admin-only" onclick="openUserModal()">用户</button></div>
     <div class="header-right-tools">
       <div class="offline-cleaner">
         <label><input id="autoHideOffline" type="checkbox" onchange="saveOfflineCleaner(); render()">自动隐藏离线</label>
         <label><span class="offline-over-text">离线超过</span> <input id="offlineHideMinutes" type="number" value="30" min="1" onchange="saveOfflineCleaner(); render()"> 分钟</label>
       </div>
       <button class="mobile-header-toggle mobile-only admin-only" id="mobileControlsToggle" onclick="toggleMobileControls()">⬇️ 展开</button>
-      <button class="refresh-btn bind-btn" onclick="openBoundModal()">绑定设备</button><button class="refresh-btn" id="passwordBtn" onclick="changeMyPassword()">改密码</button><button class="refresh-btn user-btn" id="userManageBtn" onclick="openUserModal()">用户管理</button><button class="refresh-btn" onclick="loadDevices()">刷新</button>
+      <button class="refresh-btn bind-btn" onclick="openBoundModal()">绑定设备</button><button class="refresh-btn user-btn admin-only" id="userManageBtn" onclick="openUserModal()">用户管理</button><button class="refresh-btn" onclick="loadDevices()">刷新</button>
     </div>
   </div>
 </div>
@@ -2118,8 +2138,11 @@ const params = new URLSearchParams(location.search);
 const keyFromUrl = params.get("key") || "";
 const apiKeyFromUrl = params.get("api_key") || "";
 if (keyFromUrl) localStorage.setItem("ADMIN_KEY", keyFromUrl);
-if (apiKeyFromUrl) localStorage.setItem("USER_API_KEY", apiKeyFromUrl);
-const ADMIN_KEY = keyFromUrl || localStorage.getItem("ADMIN_KEY") || "";
+if (apiKeyFromUrl) {
+  localStorage.setItem("USER_API_KEY", apiKeyFromUrl);
+  localStorage.removeItem("ADMIN_KEY");
+}
+const ADMIN_KEY = keyFromUrl || (apiKeyFromUrl ? "" : (localStorage.getItem("ADMIN_KEY") || ""));
 const USER_API_KEY = apiKeyFromUrl || localStorage.getItem("USER_API_KEY") || "";
 const IS_ADMIN = !!ADMIN_KEY;
 if(IS_ADMIN){ document.body.classList.add("is-admin-mode"); }
@@ -2876,6 +2899,9 @@ h2{margin:0 0 18px;font-size:22px;font-weight:950}
 input,button{font-size:17px;padding:13px;border-radius:12px;margin-top:12px;width:100%;box-sizing:border-box}
 input{border:1px solid #d0d5dd}
 button{border:0;background:#1d9bf0;color:#fff;font-weight:900}
+.link-btn{background:#eef2f7;color:#1d9bf0}
+.change-box{display:none;margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb}
+.change-box.show{display:block}
 .err{display:none;margin-top:12px;color:#d92d20;font-size:14px;font-weight:800}
 </style></head>
 <body><div class='box'>
@@ -2883,6 +2909,14 @@ button{border:0;background:#1d9bf0;color:#fff;font-weight:900}
 <input id='username' placeholder='用户名' autocomplete='username'>
 <input id='password' placeholder='密码' type='password' autocomplete='current-password'>
 <button onclick='goPasswordLogin()'>登录</button>
+<button class='link-btn' onclick='toggleChangePassword()' type='button'>修改密码</button>
+<div id='changeBox' class='change-box'>
+  <input id='changeUsername' placeholder='用户名' autocomplete='username'>
+  <input id='oldPassword' placeholder='当前密码' type='password' autocomplete='current-password'>
+  <input id='newPassword' placeholder='新密码' type='password' autocomplete='new-password'>
+  <input id='repeatPassword' placeholder='确认新密码' type='password' autocomplete='new-password'>
+  <button onclick='goChangePassword()' type='button'>确认修改</button>
+</div>
 <div id='err' class='err'></div>
 </div>
 <script>
@@ -2904,7 +2938,35 @@ async function goPasswordLogin(){
     });
     const data = await r.json();
     if(!r.ok || !data.ok) throw new Error(data.detail || '登录失败');
+    localStorage.removeItem('ADMIN_KEY');
+    if(data.api_key) localStorage.setItem('USER_API_KEY', data.api_key);
     location.href = data.url;
+  }catch(e){ showErr(e.message); }
+}
+function toggleChangePassword(){
+  document.getElementById('err').style.display='none';
+  document.getElementById('changeBox').classList.toggle('show');
+}
+async function goChangePassword(){
+  const username = document.getElementById('changeUsername').value.trim();
+  const old_password = document.getElementById('oldPassword').value;
+  const new_password = document.getElementById('newPassword').value;
+  const repeat = document.getElementById('repeatPassword').value;
+  document.getElementById('err').style.display='none';
+  if(!username || !old_password || !new_password){ showErr('请填写用户名、当前密码和新密码'); return; }
+  if(new_password !== repeat){ showErr('两次新密码不一致'); return; }
+  try{
+    const r = await fetch('/api/change-password-login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username, old_password, new_password})
+    });
+    const data = await r.json();
+    if(!r.ok || !data.ok) throw new Error(data.detail || '修改失败');
+    document.getElementById('oldPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('repeatPassword').value = '';
+    showErr('密码已修改，请用新密码登录');
   }catch(e){ showErr(e.message); }
 }
 document.getElementById('password').addEventListener('keydown', function(e){
