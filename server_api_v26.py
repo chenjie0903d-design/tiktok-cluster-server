@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.8")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V5.9")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -334,7 +334,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V5.8：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V5.9：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -399,7 +399,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.8-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/admin", "version":"v26-web-v5.9-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -603,7 +603,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v5.8-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_8", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8"]}
+    return {"ok": True, "version": "v26-web-v5.9-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v5_9", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -895,7 +895,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V5.8</title>
+<title>TikTok 集群控制台 Web V5.9</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -1748,6 +1748,49 @@ body.sync-collapsed{padding-bottom:42px}
   }
   .user-create button::first-line{
     line-height:1.05!important;
+  }
+}
+
+
+/* V5.9：电脑端隐藏展开按钮，右侧按钮拉开；手机统计行加大2号 */
+@media (min-width:900px){
+  .header-status-row .mobile-header-toggle,
+  .header-status-row .mobile-only{
+    display:none!important;
+  }
+  .header-right-tools{
+    gap:14px!important;
+    padding-right:8px!important;
+  }
+  .header-right-tools .offline-cleaner{
+    margin-right:8px!important;
+  }
+  .header-status-row .bind-btn,
+  .header-status-row .user-btn,
+  .header-status-row .refresh-btn{
+    margin-left:0!important;
+    margin-right:0!important;
+    border-radius:12px!important;
+    min-width:96px!important;
+    height:46px!important;
+    padding:8px 14px!important;
+    font-size:18px!important;
+    white-space:nowrap!important;
+  }
+  .header-status-row .refresh-btn{
+    min-width:74px!important;
+  }
+  .header-status-row .bind-btn{
+    min-width:98px!important;
+  }
+  .header-status-row .user-btn{
+    min-width:98px!important;
+  }
+}
+@media (max-width:899px){
+  .stats-line-wrap .stats{
+    font-size:18px!important;
+    font-weight:950!important;
   }
 }
 
@@ -2667,8 +2710,8 @@ def mobile_admin(request: Request, key: Optional[str] = None, api_key: Optional[
         <div class='tip'>管理员用 ADMIN_KEY；普通用户用 API 密钥。没有正确密码不会加载控制台。</div>
         </div>
         <script>
-        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=58'}
-        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=58'}
+        function goAdmin(){location.href='/admin?key='+encodeURIComponent(document.getElementById('k').value)+'&v=59'}
+        function goUser(){location.href='/admin?api_key='+encodeURIComponent(document.getElementById('a').value)+'&v=59'}
         </script></body></html>
         """, status_code=401)
 
