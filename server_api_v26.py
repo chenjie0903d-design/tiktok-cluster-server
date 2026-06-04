@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.2")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.3")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
@@ -218,6 +218,39 @@ def get_bound_device(machine_code: str):
     ''', [machine_code], one=True)
 
 
+def check_bound_device_client(machine_code: str):
+    """
+    V6.3：客户端不再需要 API Key。
+    客户端接口只按 machine_code 授权：
+    - machine_code 必须已在后台绑定到某个用户；
+    - 用户必须 active 且未过期；
+    - 设备必须 active。
+    """
+    code = normalize_machine_code(machine_code)
+    if not code:
+        raise HTTPException(status_code=400, detail="machine_code invalid")
+    if not multi_user_enabled():
+        return {"is_admin": True, "user_id": None, "username": "LEGACY", "role": "admin"}
+    row = db_query("""
+        SELECT bd.*, u.username, u.status AS user_status, u.expires_at AS user_expires_at, u.max_devices
+        FROM bound_devices bd
+        JOIN users u ON u.id=bd.user_id
+        WHERE bd.machine_code=%s
+    """, [code], one=True)
+    if not row:
+        raise HTTPException(status_code=403, detail="device not bound")
+    if row.get("status") != "active":
+        raise HTTPException(status_code=403, detail="device disabled")
+    if row.get("user_status") != "active":
+        raise HTTPException(status_code=403, detail="user disabled")
+    if row.get("user_expires_at"):
+        expired = db_query("SELECT NOW() > %s AS expired", [row.get("user_expires_at")], one=True)
+        if expired and expired.get("expired"):
+            raise HTTPException(status_code=403, detail="user expired")
+    return {"is_admin": False, "user_id": int(row["user_id"]), "username": row.get("username") or "", "role": "user", "bound_device": row}
+
+
+
 def verify_device_access(request: Request, machine_code: str, key: Optional[str] = None, api_key: Optional[str] = None):
     ctx = get_auth_context(request, key, api_key)
     if ctx["is_admin"] or not multi_user_enabled():
@@ -334,7 +367,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V6.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V6.3：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -399,7 +432,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v5.0 multi-user is running", "admin": "/tiktok", "version":"v26-web-v6.2-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v6.3 multi-user is running", "admin": "/tiktok", "version":"v26-web-v6.3-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -411,22 +444,13 @@ def heartbeat(data: Heartbeat, request: Request):
     user_id = None
     username = ""
     if multi_user_enabled():
-        raw_key = extract_bearer(request)
-        user_row = check_user_active(get_user_by_api_key(raw_key))
-        user_id = int(user_row["user_id"])
-        username = user_row["username"]
-        bd = get_bound_device(machine_code)
-        if not bd:
-            # 当前版本默认白名单模式：必须先绑定机器码。
-            raise HTTPException(status_code=403, detail="device not bound")
-        if int(bd["user_id"]) != user_id:
-            raise HTTPException(status_code=403, detail="device bound to another user")
-        if bd.get("status") != "active":
-            raise HTTPException(status_code=403, detail="device disabled")
-        db_query('''
+        ctx = check_bound_device_client(machine_code)
+        user_id = int(ctx["user_id"])
+        username = ctx.get("username") or ""
+        db_query("""
             UPDATE bound_devices SET last_seen=NOW(), device_name=COALESCE(NULLIF(%s,''), device_name), client_version=%s
             WHERE machine_code=%s
-        ''', [str(data.device_name or "").strip(), data.app_version, machine_code], commit=True)
+        """, [str(data.device_name or "").strip(), data.app_version, machine_code], commit=True)
 
     old = devices.get(machine_code, {})
     location_carrier = data.location_carrier
@@ -452,7 +476,7 @@ def heartbeat(data: Heartbeat, request: Request):
         "last_seen": now,
     }
     commands.setdefault(machine_code, [])
-    return {"ok": True, "server_time": now}
+    return {"ok": True, "server_time": now, "user_id": user_id, "username": username}
 
 
 def build_device_item(d: dict, now: float):
@@ -549,16 +573,17 @@ def send_all(cmd: CommandIn, request: Request, key: Optional[str] = None, api_ke
 def pull_commands(machine_code: str, request: Request):
     machine_code = normalize_machine_code(machine_code)
     if multi_user_enabled():
-        verify_device_access(request, machine_code, None, None)
+        check_bound_device_client(machine_code)
     pending = commands.get(machine_code, [])
     commands[machine_code] = []
     return {"ok": True, "commands": pending}
+
 
 @app.post("/api/devices/{machine_code}/screenshot")
 def upload_screenshot(machine_code: str, shot: ScreenshotIn, request: Request):
     machine_code = normalize_machine_code(machine_code)
     if multi_user_enabled():
-        ctx = verify_device_access(request, machine_code)
+        ctx = check_bound_device_client(machine_code)
     else:
         ctx = {"user_id": None}
     if machine_code not in devices:
@@ -603,7 +628,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v6.2-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_2", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0", "single_login_auto_role_v6_1", "tiktok_path_v6_2"]}
+    return {"ok": True, "version": "v26-web-v6.3-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_3", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0", "single_login_auto_role_v6_1", "tiktok_path_v6_2", "machine_code_client_auth_v6_3"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -642,9 +667,10 @@ def set_all_config(data: ConfigIn, request: Request, key: Optional[str] = None, 
 def upload_log(machine_code: str, data: LogIn, request: Request):
     machine_code = normalize_machine_code(machine_code)
     if multi_user_enabled():
-        verify_device_access(request, machine_code)
+        check_bound_device_client(machine_code)
     logs_store[machine_code] = {"machine_code": machine_code, "text": data.text or "", "created_at": time.time()}
     return {"ok": True}
+
 
 @app.get("/api/devices/{machine_code}/log")
 def get_log(machine_code: str, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
@@ -895,7 +921,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V6.2</title>
+<title>TikTok 集群控制台 Web V6.3</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -2715,12 +2741,12 @@ def unified_login(request: Request, token: str):
         raise HTTPException(status_code=401, detail="empty token")
 
     if admin_auth_ok(request, raw):
-        return {"ok": True, "role": "admin", "url": f"/tiktok?key={raw}&v=62"}
+        return {"ok": True, "role": "admin", "url": f"/tiktok?key={raw}&v=63"}
 
     try:
         row = get_user_by_api_key(raw)
         check_user_active(row)
-        return {"ok": True, "role": "user", "url": f"/tiktok?api_key={raw}&v=62"}
+        return {"ok": True, "role": "user", "url": f"/tiktok?api_key={raw}&v=63"}
     except Exception:
         raise HTTPException(status_code=401, detail="登录失败，密码或密钥不正确")
 
