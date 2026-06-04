@@ -13,10 +13,12 @@ from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi import Header
 
-app = FastAPI(title="TikTok Cluster Control Server Web Admin V6.4")
+app = FastAPI(title="TikTok Cluster Control Server Web Admin V7.2")
 
 devices: Dict[str, dict] = {}
 commands: Dict[str, List[dict]] = {}
+command_results: Dict[str, List[dict]] = {}
+command_owner_map: Dict[str, dict] = {}
 screenshots: Dict[str, dict] = {}
 configs: Dict[str, dict] = {}
 logs_store: Dict[str, dict] = {}
@@ -360,6 +362,12 @@ def add_bound_device(user_id: int, machine_code: str, device_name: str = "", bin
 def cleanup_runtime_device(machine_code: str):
     devices.pop(machine_code, None)
     commands.pop(machine_code, None)
+    try:
+        for _cid, _owner in list(command_owner_map.items()):
+            if _owner.get("machine_code") == machine_code:
+                command_owner_map.pop(_cid, None)
+    except Exception:
+        pass
     screenshots.pop(machine_code, None)
     configs.pop(machine_code, None)
     logs_store.pop(machine_code, None)
@@ -392,6 +400,12 @@ class Heartbeat(BaseModel):
 class CommandIn(BaseModel):
     command: str
     value: Optional[str] = None
+
+class CommandResultIn(BaseModel):
+    command_id: Optional[str] = None
+    command: Optional[str] = None
+    success: bool = False
+    error: Optional[str] = None
 
 class ScreenshotIn(BaseModel):
     image_base64: str
@@ -446,7 +460,7 @@ class StatusIn(BaseModel):
 
 def extract_work_time_from_log_text(text: str):
     """
-    Web V6.3：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
+    Web V7.2：桌面端控制区改为两行按钮，底部参数同步改为单行显示（仅桌面端）。
     兼容类似：
     工作时间：00:12:31
     工作时长：12分钟
@@ -511,7 +525,7 @@ def assign_daily_seq(machine_code: str) -> int:
 
 @app.get("/")
 def home():
-    return {"ok": True, "msg": "TikTok cluster server web admin v6.4 multi-user is running", "admin": "/tiktok", "version":"v26-web-v6.4-multi-user"}
+    return {"ok": True, "msg": "TikTok cluster server web admin v7.2 multi-user is running", "admin": "/tiktok", "version":"v26-web-v7.2-multi-user"}
 
 @app.post("/api/heartbeat")
 def heartbeat(data: Heartbeat, request: Request):
@@ -527,8 +541,10 @@ def heartbeat(data: Heartbeat, request: Request):
         user_id = int(ctx["user_id"])
         username = ctx.get("username") or ""
         incoming_name = str(data.device_name or "").strip()
-        bound_name = str((ctx.get("bound_device") or {}).get("device_name") or "").strip()
-        if is_bad_device_name_value(bound_name) and not is_bad_device_name_value(incoming_name):
+        # V7.2：客户端在“改名/截图同步设备名”后会通过心跳带回真实设备名。
+        # 旧逻辑只在数据库旧名为空/未知时才覆盖，导致控制台一直显示旧名字。
+        # 现在只要 incoming_name 是有效设备名，就同步到 bound_devices。
+        if not is_bad_device_name_value(incoming_name):
             db_query("""
                 UPDATE bound_devices SET last_seen=NOW(), device_name=%s, client_version=%s
                 WHERE machine_code=%s
@@ -542,7 +558,9 @@ def heartbeat(data: Heartbeat, request: Request):
     old = devices.get(machine_code, {})
     old_device_name = old.get("device_name", "")
     incoming_device_name = str(data.device_name or "").strip()
-    if is_bad_device_name_value(old_device_name) and not is_bad_device_name_value(incoming_device_name):
+    # V7.2：有效的心跳设备名优先覆盖旧显示名。
+    # 这样截图/改名后客户端同步的新名称能立即显示到控制台。
+    if not is_bad_device_name_value(incoming_device_name):
         display_device_name = incoming_device_name
     elif not is_bad_device_name_value(old_device_name):
         display_device_name = old_device_name
@@ -643,12 +661,65 @@ def list_devices(request: Request, key: Optional[str] = None, api_key: Optional[
     result.sort(key=lambda x: (not x.get("online", False), x.get("daily_seq", 999999), str(x.get("username") or ""), str(x.get("device_name") or "")))
     return {"ok": True, "devices": result, "is_admin": ctx["is_admin"], "username": ctx.get("username")}
 
+
+def command_sender_scope(ctx: dict) -> str:
+    if ctx.get("is_admin"):
+        return "admin"
+    return f"user:{int(ctx.get('user_id') or 0)}"
+
+def command_sender_label(ctx: dict) -> str:
+    if ctx.get("is_admin"):
+        return "ADMIN"
+    return str(ctx.get("username") or f"用户{ctx.get('user_id')}")
+
+def make_command_item(cmd: CommandIn, ctx: dict, machine_code: str):
+    item = {
+        "id": str(uuid.uuid4()),
+        "command": cmd.command,
+        "value": cmd.value,
+        "created_at": time.time(),
+        "sender_scope": command_sender_scope(ctx),
+        "sender_user_id": ctx.get("user_id"),
+        "sender_username": command_sender_label(ctx),
+        "target_machine_code": machine_code,
+    }
+    command_owner_map[item["id"]] = {
+        "sender_scope": item["sender_scope"],
+        "sender_user_id": item["sender_user_id"],
+        "sender_username": item["sender_username"],
+        "machine_code": machine_code,
+        "command": cmd.command,
+        "created_at": item["created_at"],
+    }
+    return item
+
+def push_command_failure(command_id: str, machine_code: str, command: str, error: str, device_name: str = ""):
+    owner = command_owner_map.get(str(command_id or ""))
+    if not owner:
+        # 找不到发送者时，不乱弹给其他用户；只给 ADMIN 兜底。
+        owner = {"sender_scope": "admin", "sender_username": "ADMIN", "machine_code": machine_code, "command": command}
+    scope = owner.get("sender_scope") or "admin"
+    row = {
+        "id": str(uuid.uuid4()),
+        "command_id": command_id,
+        "machine_code": machine_code,
+        "device_name": device_name or (devices.get(machine_code, {}) or {}).get("device_name") or machine_code[:8],
+        "command": command or owner.get("command") or "",
+        "error": str(error or "")[:1200],
+        "sender_username": owner.get("sender_username") or "",
+        "created_at": time.time(),
+    }
+    command_results.setdefault(scope, []).append(row)
+    # 防止内存无限增长
+    command_results[scope] = command_results[scope][-100:]
+    return row
+
+
 @app.post("/api/devices/{machine_code}/command")
 def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
     machine_code = normalize_machine_code(machine_code)
-    verify_device_access(request, machine_code, key, api_key)
-    # V6.4：允许给已绑定设备排队，即使内存 devices 里暂时没有该设备。
-    # 这样 DB 已绑定但内存丢失/刚重启时，改名等命令不会直接 404。
+    ctx = verify_device_access(request, machine_code, key, api_key)
+    # V7.2：记录是谁下发的命令。客户端执行失败时，只弹给这个发送者。
     if machine_code not in devices:
         if multi_user_enabled():
             bd = get_bound_device(machine_code)
@@ -668,13 +739,16 @@ def send_command(machine_code: str, cmd: CommandIn, request: Request, key: Optio
             }
         else:
             raise HTTPException(status_code=404, detail="device not found")
-    item = {"id": str(uuid.uuid4()), "command": cmd.command, "value": cmd.value, "created_at": time.time()}
+
+    item = make_command_item(cmd, ctx, machine_code)
     commands.setdefault(machine_code, []).append(item)
+
     if str(cmd.command).strip() == "rename" and cmd.value:
         devices[machine_code]["device_name"] = str(cmd.value).strip()
         if multi_user_enabled():
             db_query("UPDATE bound_devices SET device_name=%s WHERE machine_code=%s", [str(cmd.value).strip(), machine_code], commit=True)
     return {"ok": True, "queued": item}
+
 
 @app.post("/api/commands/all")
 def send_all(cmd: CommandIn, request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
@@ -686,10 +760,35 @@ def send_all(cmd: CommandIn, request: Request, key: Optional[str] = None, api_ke
             continue
         if now - d.get("last_seen", 0) > 120:
             continue
-        item = {"id": str(uuid.uuid4()), "command": cmd.command, "value": cmd.value, "created_at": time.time()}
+        item = make_command_item(cmd, ctx, machine_code)
         commands.setdefault(machine_code, []).append(item)
         count += 1
     return {"ok": True, "count": count}
+
+
+
+@app.post("/api/devices/{machine_code}/command-result")
+def upload_command_result(machine_code: str, data: CommandResultIn, request: Request):
+    machine_code = normalize_machine_code(machine_code)
+    if multi_user_enabled():
+        check_bound_device_client(machine_code)
+    # V7.2：成功不处理；失败只通知命令发送者。
+    if data.success:
+        return {"ok": True}
+    error = str(data.error or "").strip()
+    if not error:
+        error = "命令执行失败"
+    row = push_command_failure(data.command_id or "", machine_code, data.command or "", error)
+    return {"ok": True, "stored": row}
+
+@app.get("/api/command-results")
+def get_command_results(request: Request, key: Optional[str] = None, api_key: Optional[str] = None):
+    ctx = get_auth_context(request, key, api_key)
+    scope = command_sender_scope(ctx)
+    rows = command_results.get(scope, [])
+    command_results[scope] = []
+    return {"ok": True, "results": rows}
+
 
 @app.get("/api/devices/{machine_code}/commands")
 def pull_commands(machine_code: str, request: Request):
@@ -709,7 +808,21 @@ def upload_screenshot(machine_code: str, shot: ScreenshotIn, request: Request):
     else:
         ctx = {"user_id": None}
     if machine_code not in devices:
-        devices[machine_code] = {"machine_code": machine_code, "device_name": machine_code[:8], "status": "online", "running": False, "last_seen": time.time(), "user_id": ctx.get("user_id")}
+        db_name = ""
+        try:
+            if multi_user_enabled():
+                bd = get_bound_device(machine_code)
+                db_name = str((bd or {}).get("device_name") or "").strip()
+        except Exception:
+            db_name = ""
+        devices[machine_code] = {
+            "machine_code": machine_code,
+            "device_name": db_name if not is_bad_device_name_value(db_name) else machine_code[:8],
+            "status": "online",
+            "running": False,
+            "last_seen": time.time(),
+            "user_id": ctx.get("user_id")
+        }
     safe_code = "".join(c for c in machine_code if c.isalnum() or c in ("-", "_"))[:80]
     if multi_user_enabled() and ctx.get("user_id"):
         user_dir = os.path.join(SCREENSHOT_DIR, f"user_{ctx['user_id']}")
@@ -750,7 +863,7 @@ def delete_device(machine_code: str, request: Request, key: Optional[str] = None
 
 @app.get("/api/version")
 def version():
-    return {"ok": True, "version": "v26-web-v6.4-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v6_4", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0", "single_login_auto_role_v6_1", "tiktok_path_v6_2", "machine_code_client_auth_v6_3", "db_last_seen_online_v6_4", "rename_queue_offline_bound_v6_4"]}
+    return {"ok": True, "version": "v26-web-v7.2-multi-user", "features": ["multi_user", "postgresql", "api_key", "machine_code_whitelist", "heartbeat", "ip_location", "commands", "daily_sequence", "screenshot_last_only", "mobile_admin_v7_2", "admin_key_strict", "admin_page_auth_gate", "api_key_modal_persistent", "admin_full_user_device_manage", "expires_days_input", "user_expire_title", "create_user_days_modal_fix", "mobile_user_button", "layout_tune_v5_8", "header_spacing_fix_v5_9", "bind_select_clear_v6_0", "single_login_auto_role_v6_1", "tiktok_path_v6_2", "machine_code_client_auth_v6_3", "db_last_seen_online_v6_4", "rename_queue_offline_bound_v6_4", "client_silent_v31_7", "offline_hide_scope_v6_9", "heartbeat_device_name_overwrite_v7_0", "command_failure_to_sender_v7_1", "client_no_local_diag_log_v7_2"]}
 
 @app.get("/api/debug/devices")
 def debug_devices(request: Request, key: Optional[str] = None):
@@ -1029,7 +1142,7 @@ def login_password(data: PasswordLoginIn):
     if not user.get("password_hash") or not verify_password(password, user.get("password_hash")):
         raise HTTPException(status_code=401, detail="username or password incorrect")
     raw = get_or_create_login_api_key(int(user["id"]))
-    return {"ok": True, "role": "user", "api_key": raw, "url": f"/tiktok?api_key={raw}&v=63"}
+    return {"ok": True, "role": "user", "api_key": raw, "url": f"/tiktok?api_key={raw}&v=72"}
 
 @app.post("/api/change-password-login")
 def change_password_from_login(data: PasswordLoginChangeIn):
@@ -1079,7 +1192,7 @@ MOBILE_ADMIN_HTML = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>TikTok 集群控制台 Web V6.3</title>
+<title>TikTok 集群控制台 Web V7.2</title>
 <style>
 :root{
   --blue:#1d9bf0;--green:#1db954;--red:#ff2d2f;--orange:#ff9f1a;--dark:#465465;
@@ -2415,9 +2528,23 @@ document.body.classList.add("header-controls-collapsed");
 let DEVICES = [];
 let selected = new Set();
 
+
+function storageScopeKey(base){
+  try{
+    if(IS_ADMIN) return base + "_admin_global";
+    const u = (API_KEY || USERNAME || "user").toString().slice(0,80);
+    return base + "_user_" + u;
+  }catch(e){
+    return base + "_user_default";
+  }
+}
+function offlineHideKey(){
+  return storageScopeKey("offline_hide_minutes_v69");
+}
+
 function loadOfflineCleaner(){
-  const enabled = localStorage.getItem("AUTO_HIDE_OFFLINE") === "1";
-  const minutes = Number(localStorage.getItem("OFFLINE_HIDE_MINUTES") || 30);
+  const enabled = localStorage.getItem(offlineHideKey()) === "1";
+  const minutes = Number(localStorage.getItem(offlineHideKey()) || 30);
   const cb = document.getElementById("autoHideOffline");
   const input = document.getElementById("offlineHideMinutes");
   if(cb) cb.checked = enabled;
@@ -2426,8 +2553,8 @@ function loadOfflineCleaner(){
 function saveOfflineCleaner(){
   const cb = document.getElementById("autoHideOffline");
   const input = document.getElementById("offlineHideMinutes");
-  localStorage.setItem("AUTO_HIDE_OFFLINE", cb && cb.checked ? "1" : "0");
-  localStorage.setItem("OFFLINE_HIDE_MINUTES", String(Number(input && input.value || 30)));
+  localStorage.setItem(offlineHideKey(), cb && cb.checked ? "1" : "0");
+  localStorage.setItem(offlineHideKey(), String(Number(input && input.value || 30)));
 }
 function shouldHideOfflineDevice(d){
   const cb = document.getElementById("autoHideOffline");
@@ -2932,14 +3059,49 @@ async function loadDevices(){
     document.getElementById("stats").textContent = "刷新失败：" + e.message;
   }
 }
-async function sendAll(cmd){
-  if(!confirm("确定下发到全部在线设备？")) return;
-  try{
-    const data = await api("/api/commands/all",{method:"POST",body:JSON.stringify({command:cmd})});
-    alert(`已下发 ${cmd}，数量：${data.count||0}`);
-    setTimeout(loadDevices, 1000);
-  }catch(e){ alert("失败：" + e.message); }
+
+let COMMAND_RESULT_ALERTING = false;
+function commandNameText(cmd){
+  const map = {
+    open_target:"打开", start:"启动", start_target:"启动", start_monitor:"开监控",
+    stop_monitor:"停监控", stop:"停监控", screenshot:"截图", rename:"改名",
+    restart_app_only:"重启", restart_target_only:"重启",
+    restart_app:"重启后启动", restart_app_start:"重启后启动", restart_target_start:"重启后启动",
+    update_github_config:"更新GitHub", check_github_config:"更新GitHub",
+    update_package:"远程更新"
+  };
+  return map[cmd] || cmd || "命令";
 }
+async function pollCommandResults(){
+  if(COMMAND_RESULT_ALERTING) return;
+  try{
+    const data = await api("/api/command-results");
+    const rows = data.results || [];
+    if(!rows.length) return;
+    COMMAND_RESULT_ALERTING = true;
+    const text = rows.map(r=>{
+      const dev = r.device_name || r.machine_code || "";
+      return `${dev}：${commandNameText(r.command)}失败：${r.error || "未知错误"}`;
+    }).join("\\n");
+    await centerAlert(text);
+  }catch(e){
+    // 轮询失败不弹窗，避免干扰控制台
+  }finally{
+    COMMAND_RESULT_ALERTING = false;
+  }
+}
+setInterval(pollCommandResults, 3000);
+setTimeout(pollCommandResults, 1200);
+
+
+async function sendAll(cmd){
+  if(!await centerConfirm("确定下发到全部在线设备？")) return;
+  try{
+    await api("/api/commands/all",{method:"POST",body:JSON.stringify({command:cmd})});
+    setTimeout(loadDevices, 1000);
+  }catch(e){ await centerAlert("下发失败：" + e.message); }
+}
+
 async function sendOne(code,cmd,shot=false){
   try{
     await api(`/api/devices/${encodeURIComponent(code)}/command`,{method:"POST",body:JSON.stringify({command:cmd})});
@@ -2950,12 +3112,13 @@ async function sendOne(code,cmd,shot=false){
     }else{
       setTimeout(loadDevices, 1000);
     }
-  }catch(e){ alert("失败：" + e.message); }
+  }catch(e){ await centerAlert("下发失败：" + e.message); }
 }
+
 async function sendSelected(cmd){
   const list = [...selected];
-  if(list.length===0){ alert("请先勾选设备"); return; }
-  if(!confirm(`确定给选中的 ${list.length} 台设备下发 ${cmd}？`)) return;
+  if(list.length===0){ await centerAlert("请先勾选设备"); return; }
+  if(!await centerConfirm(`确定给选中的 ${list.length} 台设备下发 ${commandNameText(cmd)}？`)) return;
   const results = await Promise.all(list.map(code =>
     api(`/api/devices/${encodeURIComponent(code)}/command`, {
       method:"POST",
@@ -2964,7 +3127,7 @@ async function sendSelected(cmd){
   ));
   const failed = results.filter(r=>!r.ok);
   if(failed.length){
-    alert(`部分设备下发失败：${failed.length}/${list.length}\n` + failed.map(r=>`${r.code}: ${r.error}`).join("\n"));
+    await centerAlert(`部分设备下发失败：${failed.length}/${list.length}\n` + failed.map(r=>`${r.code}: ${r.error}`).join("\n"));
   }
   if(cmd==="screenshot"){
     setTimeout(loadDevices, 4500);
@@ -2974,6 +3137,7 @@ async function sendSelected(cmd){
     setTimeout(loadDevices, 1000);
   }
 }
+
 async function screenshotSelected(){ await sendSelected("screenshot"); }
 async function batchScreenshotAll(){ await sendAll("screenshot"); setTimeout(loadDevices, 4500); setTimeout(loadDevices, 8500); setTimeout(loadDevices, 12500); }
 
@@ -2994,7 +3158,7 @@ async function deleteDeviceConfirm(event, code){
 
 async function renameSelected(){
   const list = [...selected];
-  if(list.length===0){ alert("请先勾选设备"); return; }
+  if(list.length===0){ await centerAlert("请先勾选设备"); return; }
   if(list.length===1){ return renameOne(list[0]); }
   const base = await centerPrompt(`已选择 ${list.length} 台设备，输入批量基础名称：`, "");
   if(!base) return;
@@ -3009,7 +3173,7 @@ async function renameSelected(){
     }
     setTimeout(loadDevices,1000);
     setTimeout(()=>screenshotSelected(),3000);
-  }catch(e){ alert("批量改名失败：" + e.message); }
+  }catch(e){ await centerAlert("批量改名下发失败：" + e.message); }
 }
 
 async function renameOne(code){
@@ -3019,12 +3183,12 @@ async function renameOne(code){
   try{
     await api(`/api/devices/${encodeURIComponent(code)}/command`,{method:"POST",body:JSON.stringify({command:"rename",value:name})});
     setTimeout(loadDevices,1000);
-    // V3.0：改名后延迟3秒自动截图回传，方便确认改名是否成功
     setTimeout(()=>sendOne(code,'screenshot', true),3000);
     setTimeout(loadDevices,7000);
     setTimeout(loadDevices,11000);
-  }catch(e){ alert("改名失败：" + e.message); }
+  }catch(e){ await centerAlert("改名下发失败：" + e.message); }
 }
+
 function showShot(code){
   const d = DEVICES.find(x=>x.machine_code===code) || {};
   const t = d.screenshot_time || 0;
@@ -3117,26 +3281,23 @@ async function updatePackageSelected(){
         body:JSON.stringify({command:"update_package", value:JSON.stringify(cfg)})
       });
     }
-    await centerAlert("已下发远程更新包命令");
     setTimeout(loadDevices, 1000);
   }catch(e){ await centerAlert("下发失败：" + e.message); }
 }
+
 async function updatePackageAll(){
   const cfg = getPackageConfig();
   const err = validatePackageConfig(cfg);
   if(err){ await centerAlert(err); return; }
   if(!await centerConfirm("确定给全部在线设备远程更新软件包？\n\n默认解压到客户端桌面。")) return;
   try{
-    const data = await api("/api/commands/all",{
+    await api("/api/commands/all",{
       method:"POST",
       body:JSON.stringify({command:"update_package", value:JSON.stringify(cfg)})
     });
-    await centerAlert(`已下发远程更新包命令，数量：${data.count||0}`);
     setTimeout(loadDevices, 1000);
   }catch(e){ await centerAlert("下发失败：" + e.message); }
 }
-
-
 
 function formatExpireDateText(value){
   if(!value) return "永久";
@@ -3296,12 +3457,12 @@ def unified_login(request: Request, token: Optional[str] = ""):
         return HTMLResponse(LOGIN_HTML, status_code=401)
 
     if admin_auth_ok(request, raw):
-        return {"ok": True, "role": "admin", "url": f"/tiktok?key={raw}&v=63"}
+        return {"ok": True, "role": "admin", "url": f"/tiktok?key={raw}&v=72"}
 
     try:
         row = get_user_by_api_key(raw)
         check_user_active(row)
-        return {"ok": True, "role": "user", "url": f"/tiktok?api_key={raw}&v=63"}
+        return {"ok": True, "role": "user", "url": f"/tiktok?api_key={raw}&v=72"}
     except Exception:
         raise HTTPException(status_code=401, detail="登录失败，密码或密钥不正确")
 
